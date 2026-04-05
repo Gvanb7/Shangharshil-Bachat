@@ -1,6 +1,6 @@
 # Shangharshil Yuva Bachat Samuha Website
 
-A web application for managing savings and loans for a community group.
+A web application for managing the transactions related to a bachat samuha.
 
 ## Features
 - Admin can add users, manage savings, loans, expenditures and related financial activities
