@@ -1,0 +1,99 @@
+from rest_framework import serializers
+from decimal import Decimal
+from .models import SavingsAccount, SavingsTransaction, Loan, LoanRepayment, Expenditure
+from .services import calculate_loan_summary
+
+class SavingsAccountSerializer(serializers.ModelSerializer):
+    member_name = serializers.CharField(source='member.full_name', read_only=True)
+    member_email = serializers.EmailField(source='member.email', read_only=True)
+    
+    class Meta:
+        model = SavingsAccount
+        fields = [
+            'id', 'member', 'member_name', 'member_email', 
+            'balance', 'interest_rate', 'opened_on', 'is_active',
+        ]
+        read_only_fields = ['id', 'member_name', 'member_email', 'opened_on']
+        
+class SavingsTransactionSerializer(serializers.ModelSerializer):
+    recorded_by_name = serializers.CharField(source='recorded_by.full_name', read_only=True)
+    
+    class Meta:
+        model = SavingsTransaction
+        fields = [
+            'id', 'account', 'type', 'amount', 'balance_after', 
+            'note', 'recorded_by', 'recorded_by_name', 'created_at',
+        ]
+        read_only_fields = ['id', 'balance_after', 'recorded_by_name', 'created_at']
+        
+class DepositWithdrawSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    note = serializers.CharField(allow_blank=True, required=False, default='')
+    
+    def validate_amount(self, value):
+        if value <= Decimal('0.00'):
+            raise serializers.ValidationError('Amount must be greater than zero.')
+        return value
+    
+class LoanSerializer(serializers.ModelSerializer):
+    member_name = serializers.CharField(source='member.full_name', read_only=True)
+    approved_by_name = serializers.CharField(source='approved_by.full_name', read_only=True)
+    loan_summary = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Loan
+        fields = [
+            'id', 'member', 'member_name', 'principal', 'interest_rate', 
+            'term_months', 'status', 'monthly_installment', 'toal_payable',
+            'amount_paid', 'amount_remaining', 'purpose', 'disbursed_on', 
+            'due_date', 'approved_by', 'approved_by_name', 'loan_summary',
+            'created_at',
+        ]
+        read_only_fields = [
+            'id', 'status', 'monthly_installment', 
+            'toal_payable', 'amount_paid', 'amount_remaining', 
+            'disbursed_on', 'due_date', 'approved_by', 'created_at',
+        ]
+        
+    def get_loan_summary(self, obj):
+        if obj.status == 'pending':
+            return calculate_loan_summary(obj.principal, obj.interest_rate, obj.term_months)
+        return None
+    
+class LoanRepaymentSerializer(serializers.ModelSerializer):
+    recorded_by_name = serializers.CharField(source='recorded_by.full_name', read_only=True)
+
+    class Meta:
+        model  = LoanRepayment
+        fields = [
+            'id', 'loan', 'amount_paid', 'principal_portion',
+            'interest_portion', 'balance_after', 'note',
+            'recorded_by', 'recorded_by_name', 'paid_at',
+        ]
+        read_only_fields = [
+            'id', 'principal_portion', 'interest_portion',
+            'balance_after', 'recorded_by', 'paid_at',
+        ]
+        
+class RepaymentInputSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    note   = serializers.CharField(required=False, allow_blank=True, default='')
+
+    def validate_amount(self, value):
+        if value <= Decimal('0.00'):
+            raise serializers.ValidationError('Amount must be greater than zero.')
+        return value
+
+
+class ExpenditureSerializer(serializers.ModelSerializer):
+    recorded_by_name = serializers.CharField(source='recorded_by.full_name', read_only=True)
+
+    class Meta:
+        model  = Expenditure
+        fields = [
+            'id', 'category', 'amount', 'description',
+            'expense_date', 'recorded_by', 'recorded_by_name', 'created_at',
+        ]
+        read_only_fields = ['id', 'recorded_by', 'created_at']
+        
+    
