@@ -15,6 +15,9 @@ from pathlib import Path
 import os
 from pathlib import Path
 from decouple import config
+import certifi
+import ssl
+import smtplib
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -24,10 +27,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-emxkd+j9!y4vmi-gs+prb@1_+-narch7$ooofpi@)48$qa$-0*'
+#SECRET_KEY = 'django-insecure-emxkd+j9!y4vmi-gs+prb@1_+-narch7$ooofpi@)48$qa$-0*'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = config('DEBUG', cast = bool, default = False)
+#DEBUG = config('DEBUG', cast = bool, default = False)
 
 ALLOWED_HOSTS = ['*']
 
@@ -59,10 +62,27 @@ MIDDLEWARE = [
 ]
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    
+]
+
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = True   
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
 ]
 
 CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5173",
     "http://localhost:3000",
     'http://127.0.0.1:8000',
 ]
@@ -93,7 +113,7 @@ TEMPLATES = [
 WSGI_APPLICATION = 'backend.wsgi.application'
 
 SECRET_KEY = config('SECRET_KEY')
-DEBUG = config('DEBUG') == 'True'
+DEBUG = config('DEBUG') == 'False'
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
@@ -164,4 +184,30 @@ EMAIL_HOST_USER = config('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL')
 
+# fix for windows ssl certificate verification error
+EMAIL_SSL_CERTIFICATE = None
+EMAIL_SSL_KEYFILE = None
+
+os.environ['SSL_CERT_FILE'] = certifi.where()
+
 OTP_EXPIRY_MINUTES = 10
+
+#security
+CSRF_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SECURE = False #true in production
+CSRF_COOKIE_SECURE = False  #true in production
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
+    'DEFAULT_RENDERER_CLASSES': (
+        'rest_framework.renderers.JSONRenderer',
+    ),
+    'EXCEPTION_HANDLER': 'rest_framework.views.exception_handler',
+}
+
+AUTH_USER_MODEL = 'accounts.User'   

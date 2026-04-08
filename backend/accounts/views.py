@@ -112,17 +112,54 @@ class AdminRegisterMemberView(APIView):
 
     def post(self, request):
         email = request.data.get('email', '').strip().lower()
+        password = request.data.get('password', '').strip()
+        full_name = request.data.get('full_name', '').strip()
+        
         if not email:
             return Response({'error': 'Email is required.'}, status=400)
+        if not password:
+            return Response({'error': 'Password is required.'}, status=400)
+        if len(password) < 8:
+            return Response({'error': 'Password must be at least 8 characters long.'}, status=400)
+        
 
         if User.objects.filter(email=email).exists():
             return Response({'error': 'This email is already registered.'}, status=400)
 
-        user = User.objects.create_user(email=email, role='member')
+        user = User.objects.create_user(email=email, password=password, full_name=full_name, role='member', is_active=True)
         return Response(
             {'message': f'Member {email} registered. They can now sign up via OTP.'},
             status=201,
         )
+        
+        
+class MemberLoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email    = request.data.get('email', '').strip().lower()
+        password = request.data.get('password', '').strip()
+
+        if not email or not password:
+            return Response({'error': 'Email and password are required.'}, status=400)
+
+        try:
+            user = User.objects.get(email__iexact=email)
+        except User.DoesNotExist:
+            return Response({'error': 'Invalid email or password.'}, status=400)
+
+        if not user.check_password(password):
+            return Response({'error': 'Invalid email or password.'}, status=400)
+
+        if not user.is_active:
+            return Response({'error': 'Your account is inactive. Contact administrator.'}, status=400)
+
+        tokens = get_tokens(user)
+        return Response({
+            'tokens': tokens,
+            'role':   user.role,
+            'user':   UserProfileSerializer(user).data,
+        })
 
 
 class AdminListMembersView(APIView):

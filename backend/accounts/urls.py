@@ -3,10 +3,7 @@ from . import views
 
 urlpatterns = [
     # Auth (public)
-    path('auth/request-otp/',   views.RequestOTPView.as_view()),
-    path('auth/verify-otp/',    views.VerifyOTPView.as_view()),
-
-    # Member (authenticated)
+    path('auth/login/',        views.MemberLoginView.as_view()),
     path('auth/me/',            views.MeView.as_view()),
     path('auth/complete-profile/', views.CompleteProfileView.as_view()),
 
