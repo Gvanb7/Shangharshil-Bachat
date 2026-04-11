@@ -20,24 +20,35 @@ from .services import (
 User = get_user_model()
 
 # ----Saving----
+
 class AdminCreateSavingsAccountView(APIView):
     permission_classes = [IsAdmin]
-    
+
     def post(self, request):
-        member_id = request.data.get('member_id')
-        if not member_id:
-            return Response({'error': 'Member ID is required.'}, status=400)
-        
-        member = get_object_or_404(User, id=member_id, is_member=True)
-        
-        if hasattr(member, 'savings_account'):
-            return Response({'error': 'Member already has a savings account.'}, status=400)
-        
-        serializer = SavingsAccountSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save(member=member)
-            return Response(serializer.data, status=201)
-        return Response(serializer.errors, status=400)
+        try:
+            member_id     = request.data.get('member_id')
+            interest_rate = request.data.get('interest_rate', '6.00')
+
+            if not member_id:
+                return Response({'error': 'member_id is required.'}, status=400)
+
+            member = get_object_or_404(User, id=member_id, role='member')
+
+            if hasattr(member, 'savings_account'):
+                return Response(
+                    {'error': 'This member already has a savings account.'},
+                    status=400
+                )
+
+            account = SavingsAccount.objects.create(
+                member=member,
+                interest_rate=interest_rate,
+            )
+
+            return Response(SavingsAccountSerializer(account).data, status=201)
+
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
     
 class AdminListSavingsAccountsView(APIView):
     """Admin views all savings accounts."""
