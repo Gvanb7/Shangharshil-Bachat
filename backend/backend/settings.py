@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'accounts',
     'main',
+    'rest_framework_simplejwt.token_blacklist',
 ]
 
 MIDDLEWARE = [
@@ -169,10 +170,19 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+# Security headers
+SECURE_BROWSER_XSS_FILTER     = True
+SECURE_CONTENT_TYPE_NOSNIFF   = True
+X_FRAME_OPTIONS                = 'DENY'
+SECURE_REFERRER_POLICY         = 'same-origin'
+
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=5),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),    
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=8),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),    
     'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'ALGORITHM': 'HS256',
+    'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
 # Gmail SMTP

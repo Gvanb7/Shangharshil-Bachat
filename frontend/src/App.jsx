@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { ProtectedRoute, AdminRoute, MemberRoute, GuestRoute } from './components/ProtectedRoute'
 import useAuthStore from './store/authStore'
 
-import LoginPage        from './pages/LoginPage'
+import LoginPage        from './pages/loginPage'
 import AdminDashboard   from './pages/admin/AdminDashboard'
 import AdminMembers     from './pages/admin/AdminMembers'
 import AdminSavings     from './pages/admin/AdminSavings'

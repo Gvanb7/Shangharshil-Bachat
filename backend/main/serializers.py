@@ -44,7 +44,7 @@ class LoanSerializer(serializers.ModelSerializer):
         model = Loan
         fields = [
             'id', 'member', 'member_name', 'principal', 'interest_rate', 
-            'term_months', 'status', 'monthly_installment', 'toal_payable',
+            'term_months', 'status', 'monthly_installment', 'total_payable',
             'amount_paid', 'amount_remaining', 'purpose', 'disbursed_on', 
             'due_date', 'approved_by', 'approved_by_name', 'loan_summary',
             'created_at',

@@ -145,12 +145,15 @@ class AdminTransactionListView(APIView):
         return Response(SavingsTransactionSerializer(txns, many=True).data)
 
 class MemberSavingsView(APIView):
-    """Member views their own savings account and transactions."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        account = get_object_or_404(SavingsAccount, member=request.user)
-        txns    = SavingsTransaction.objects.filter(account=account)[:20]
+        try:
+            account = SavingsAccount.objects.get(member=request.user)
+        except SavingsAccount.DoesNotExist:
+            return Response(None, status=200)
+
+        txns = SavingsTransaction.objects.filter(account=account)[:20]
         return Response({
             'account':      SavingsAccountSerializer(account).data,
             'transactions': SavingsTransactionSerializer(txns, many=True).data,
@@ -163,11 +166,14 @@ class AdminCreateLoanView(APIView):
     permission_classes = [IsAdmin]
 
     def post(self, request):
-        serializer = LoanSerializer(data=request.data)
-        if serializer.is_valid():
-            loan = serializer.save(status='pending')
-            return Response(LoanSerializer(loan).data, status=201)
-        return Response(serializer.errors, status=400)
+        try:
+            serializer = LoanSerializer(data=request.data)
+            if serializer.is_valid():
+                loan = serializer.save(status='pending')
+                return Response(LoanSerializer(loan).data, status=201)
+            return Response(serializer.errors, status=400)
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
 
 class AdminListLoansView(APIView):
     """Admin views all loans."""
@@ -260,14 +266,13 @@ class AdminLoanRepaymentListView(APIView):
         return Response(LoanRepaymentSerializer(repayments, many=True).data)
     
 class MemberLoanView(APIView):
-    """Member views their own loans."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        loans = Loan.objects.filter(member=request.user)
+        loans = Loan.objects.filter(
+            member=request.user
+        ).select_related('member', 'approved_by')
         return Response(LoanSerializer(loans, many=True).data)
-    
-
 
 
 #--------Expenditure-----

@@ -14,6 +14,9 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 
+from django_ratelimit.decorators import ratelimit
+from django.utils.decorators import method_decorator
+
 User = get_user_model()
 
 
@@ -132,10 +135,10 @@ class AdminRegisterMemberView(APIView):
             status=201,
         )
         
-        
 class MemberLoginView(APIView):
     permission_classes = [AllowAny]
 
+    @method_decorator(ratelimit(key='ip', rate='5/m', method='POST', block=True))
     def post(self, request):
         email    = request.data.get('email', '').strip().lower()
         password = request.data.get('password', '').strip()
