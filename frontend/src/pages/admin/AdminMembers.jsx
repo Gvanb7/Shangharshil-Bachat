@@ -11,13 +11,22 @@ export default function AdminMembers() {
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState('')
   const [showForm,   setShowForm]   = useState(false)
-  const [editMember, setEditMember] = useState(null)   // null = add mode
+  const [editMember, setEditMember] = useState(null)
   const [form,       setForm]       = useState(EMPTY_FORM)
   const [formErr,    setFormErr]    = useState('')
   const [formLoad,   setFormLoad]   = useState(false)
   const [search,     setSearch]     = useState('')
   const [showPass,   setShowPass]   = useState(false)
   const [successMsg, setSuccessMsg] = useState('')
+
+  // reset password state — inside component
+  const [showResetPw, setShowResetPw] = useState(false)
+  const [resetTarget, setResetTarget] = useState(null)
+  const [resetForm,   setResetForm]   = useState({
+    new_password: '', confirm_password: ''
+  })
+  const [resetErr,  setResetErr]  = useState('')
+  const [resetLoad, setResetLoad] = useState(false)
 
   useEffect(() => { fetchMembers() }, [])
 
@@ -82,7 +91,6 @@ export default function AdminMembers() {
     setFormLoad(true)
     try {
       if (editMember) {
-        // edit mode — only send changed fields
         const payload = {
           full_name: form.full_name,
           phone:     form.phone,
@@ -91,7 +99,6 @@ export default function AdminMembers() {
         await api.patch(`/admin/members/${editMember.id}/`, payload)
         flash('Member updated successfully.')
       } else {
-        // add mode
         await api.post('/admin/members/register/', {
           email:     form.email.trim().toLowerCase(),
           password:  form.password,
@@ -128,6 +135,36 @@ export default function AdminMembers() {
     }
   }
 
+  async function handleResetPassword(e) {
+    e.preventDefault()
+    setResetErr('')
+
+    if (resetForm.new_password !== resetForm.confirm_password) {
+      setResetErr('Passwords do not match.')
+      return
+    }
+    if (resetForm.new_password.length < 8) {
+      setResetErr('Password must be at least 8 characters.')
+      return
+    }
+
+    setResetLoad(true)
+    try {
+      await api.post(
+        `/admin/members/${resetTarget.id}/reset-password/`,
+        resetForm
+      )
+      flash(`Password reset for ${resetTarget.full_name || resetTarget.email}.`)
+      setShowResetPw(false)
+      setResetTarget(null)
+      setResetForm({ new_password: '', confirm_password: '' })
+    } catch (err) {
+      setResetErr(err.response?.data?.error || 'Failed to reset password.')
+    } finally {
+      setResetLoad(false)
+    }
+  }
+
   const filtered = members.filter((m) => {
     const q = search.toLowerCase()
     return (
@@ -141,7 +178,7 @@ export default function AdminMembers() {
     <AdminLayout>
       <div className="space-y-4">
 
-        {/* Header row */}
+        {/* Header */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h2 className="text-lg font-semibold text-gray-800">Members</h2>
@@ -154,7 +191,6 @@ export default function AdminMembers() {
           </button>
         </div>
 
-        {/* Success message */}
         {successMsg && (
           <div className="px-4 py-3 bg-green-50 border border-green-200
                           text-green-700 rounded-lg text-sm">
@@ -162,7 +198,6 @@ export default function AdminMembers() {
           </div>
         )}
 
-        {/* Error */}
         {error && (
           <div className="px-4 py-3 bg-red-50 border border-red-200
                           text-red-700 rounded-lg text-sm">
@@ -171,15 +206,13 @@ export default function AdminMembers() {
         )}
 
         {/* Search */}
-        <div>
-          <input
-            type="text"
-            className="input-field max-w-sm"
-            placeholder="Search by name, email or phone..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
+        <input
+          type="text"
+          className="input-field max-w-sm"
+          placeholder="Search by name, email or phone..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
 
         {/* Table */}
         <div className="card overflow-hidden">
@@ -208,14 +241,16 @@ export default function AdminMembers() {
                   <tr>
                     <td colSpan={6}
                       className="px-4 py-10 text-center text-gray-400">
-                      {search ? 'No members match your search.' : 'No members yet. Add one above.'}
+                      {search
+                        ? 'No members match your search.'
+                        : 'No members yet. Add one above.'}
                     </td>
                   </tr>
                 ) : filtered.map((m) => (
-                  <tr key={m.id}
-                    className="hover:bg-gray-50 transition-colors">
+                  <tr key={m.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 font-medium text-gray-800">
-                      {m.full_name || <span className="text-gray-400 italic">Not set</span>}
+                      {m.full_name ||
+                        <span className="text-gray-400 italic">Not set</span>}
                     </td>
                     <td className="px-4 py-3 text-gray-600">{m.email}</td>
                     <td className="px-4 py-3 text-gray-600">
@@ -229,13 +264,27 @@ export default function AdminMembers() {
                         {m.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
+
+                    {/* Actions — Edit | Reset password | Deactivate */}
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <button
                           onClick={() => openEditForm(m)}
-                          className="text-xs text-primary-600 hover:text-primary-800
-                                     font-medium">
+                          className="text-xs text-primary-600
+                                     hover:text-primary-800 font-medium">
                           Edit
+                        </button>
+                        <span className="text-gray-300">|</span>
+                        <button
+                          onClick={() => {
+                            setResetTarget(m)
+                            setResetForm({ new_password: '', confirm_password: '' })
+                            setResetErr('')
+                            setShowResetPw(true)
+                          }}
+                          className="text-xs text-yellow-600
+                                     hover:text-yellow-800 font-medium">
+                          Reset password
                         </button>
                         <span className="text-gray-300">|</span>
                         <button
@@ -258,13 +307,12 @@ export default function AdminMembers() {
 
       </div>
 
-      {/* Modal */}
+      {/* Add / Edit member modal */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center
                         bg-black bg-opacity-40 px-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md
                           max-h-screen overflow-y-auto">
-
             <div className="px-6 py-4 border-b border-gray-200 flex
                             items-center justify-between">
               <h3 className="font-semibold text-gray-800">
@@ -276,7 +324,6 @@ export default function AdminMembers() {
                 ✕
               </button>
             </div>
-
             <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
               {formErr && (
                 <div className="px-3 py-2 bg-red-50 border border-red-200
@@ -285,7 +332,6 @@ export default function AdminMembers() {
                 </div>
               )}
 
-              {/* Email — only shown when adding */}
               {!editMember && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -302,7 +348,6 @@ export default function AdminMembers() {
                 </div>
               )}
 
-              {/* Password — only shown when adding */}
               {!editMember && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -328,7 +373,6 @@ export default function AdminMembers() {
                 </div>
               )}
 
-              {/* Full name */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Full name
@@ -342,7 +386,6 @@ export default function AdminMembers() {
                 />
               </div>
 
-              {/* Phone */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Phone
@@ -356,7 +399,6 @@ export default function AdminMembers() {
                 />
               </div>
 
-              {/* Address */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Address
@@ -370,7 +412,6 @@ export default function AdminMembers() {
                 />
               </div>
 
-              {/* Buttons */}
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
@@ -384,8 +425,79 @@ export default function AdminMembers() {
                   className="btn-primary flex-1">
                   {formLoad
                     ? 'Saving...'
-                    : editMember ? 'Save changes' : 'Add member'
-                  }
+                    : editMember ? 'Save changes' : 'Add member'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Reset password modal */}
+      {showResetPw && resetTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center
+                        bg-black bg-opacity-40 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="px-6 py-4 border-b border-gray-200 flex
+                            items-center justify-between">
+              <h3 className="font-semibold text-gray-800">
+                Reset password — {resetTarget.full_name || resetTarget.email}
+              </h3>
+              <button
+                onClick={() => setShowResetPw(false)}
+                className="text-gray-400 hover:text-gray-600 text-xl leading-none">
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleResetPassword} className="px-6 py-5 space-y-4">
+              {resetErr && (
+                <div className="px-3 py-2 bg-red-50 border border-red-200
+                                text-red-700 rounded-lg text-sm">
+                  {resetErr}
+                </div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  New password <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="password"
+                  className="input-field"
+                  placeholder="Min. 8 characters"
+                  value={resetForm.new_password}
+                  onChange={(e) => setResetForm({
+                    ...resetForm, new_password: e.target.value
+                  })}
+                  required
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Confirm password <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="password"
+                  className="input-field"
+                  value={resetForm.confirm_password}
+                  onChange={(e) => setResetForm({
+                    ...resetForm, confirm_password: e.target.value
+                  })}
+                  required
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowResetPw(false)}
+                  className="btn-secondary flex-1">
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={resetLoad}
+                  className="btn-primary flex-1">
+                  {resetLoad ? 'Resetting...' : 'Reset password'}
                 </button>
               </div>
             </form>

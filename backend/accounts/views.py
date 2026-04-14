@@ -225,3 +225,84 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 class EmailTokenObtainPairView(TokenObtainPairView):
     serializer_class = EmailTokenObtainPairSerializer
+    
+class MemberChangePasswordView(APIView):
+    """Member changes their own password."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        current_password = request.data.get('current_password', '').strip()
+        new_password     = request.data.get('new_password', '').strip()
+        confirm_password = request.data.get('confirm_password', '').strip()
+
+        if not current_password or not new_password or not confirm_password:
+            return Response(
+                {'error': 'All fields are required.'},
+                status=400
+            )
+
+        if not request.user.check_password(current_password):
+            return Response(
+                {'error': 'Current password is incorrect.'},
+                status=400
+            )
+
+        if new_password != confirm_password:
+            return Response(
+                {'error': 'New passwords do not match.'},
+                status=400
+            )
+
+        if len(new_password) < 8:
+            return Response(
+                {'error': 'Password must be at least 8 characters.'},
+                status=400
+            )
+
+        if current_password == new_password:
+            return Response(
+                {'error': 'New password must be different from current password.'},
+                status=400
+            )
+
+        request.user.set_password(new_password)
+        request.user.save()
+        return Response({'message': 'Password changed successfully.'})
+
+
+class AdminChangePasswordView(APIView):
+    """Admin resets password for any member."""
+    permission_classes = [IsAdmin]
+
+    def post(self, request, user_id):
+        new_password     = request.data.get('new_password', '').strip()
+        confirm_password = request.data.get('confirm_password', '').strip()
+
+        if not new_password or not confirm_password:
+            return Response(
+                {'error': 'Both password fields are required.'},
+                status=400
+            )
+
+        if new_password != confirm_password:
+            return Response(
+                {'error': 'Passwords do not match.'},
+                status=400
+            )
+
+        if len(new_password) < 8:
+            return Response(
+                {'error': 'Password must be at least 8 characters.'},
+                status=400
+            )
+
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({'error': 'User not found.'}, status=404)
+
+        user.set_password(new_password)
+        user.save()
+        return Response({
+            'message': f'Password reset successfully for {user.email}.'
+        })

@@ -50,5 +50,6 @@ export default function MemberLayout({ children, title }) {
       </main>
 
     </div>
+    
   )
 }

@@ -11,6 +11,15 @@ export default function MemberDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  const [showPwForm,  setShowPwForm]  = useState(false)
+  const [pwForm,      setPwForm]      = useState({
+    current_password: '', new_password: '', confirm_password: ''
+  })
+  const [pwErr,       setPwErr]       = useState('')
+  const [pwSuccess,   setPwSuccess]   = useState('')
+  const [pwLoad,      setPwLoad]      = useState(false)
+  const [showPw,      setShowPw]      = useState(false)
+
   useEffect(() => {
     fetchData()
   }, [])
@@ -30,6 +39,35 @@ export default function MemberDashboard() {
       setError('Failed to load your data.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleChangePassword(e) {
+    e.preventDefault()
+    setPwErr('')
+    setPwSuccess('')
+    
+  
+    if (pwForm.new_password !== pwForm.confirm_password) {
+      setPwErr('New passwords do not match.')
+      return
+    }
+    if (pwForm.new_password.length < 8) {
+      setPwErr('Password must be at least 8 characters.')
+      return
+    }
+    
+  
+    setPwLoad(true)
+    try {
+      await api.post('/auth/change-password/', pwForm)
+      setPwSuccess('Password changed successfully.')
+      setPwForm({ current_password: '', new_password: '', confirm_password: '' })
+      setShowPwForm(false)
+    } catch (err) {
+      setPwErr(err.response?.data?.error || 'Failed to change password.')
+    } finally {
+      setPwLoad(false)
     }
   }
 
@@ -55,7 +93,7 @@ export default function MemberDashboard() {
     <MemberLayout>
       <div className="space-y-6">
 
-        {/* 🔥 Welcome + Summary */}
+        {/* Welcome + Summary */}
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl p-6 shadow">
           <p className="text-sm opacity-80">Welcome back,</p>
           <h1 className="text-2xl font-bold">
@@ -86,7 +124,7 @@ export default function MemberDashboard() {
           </div>
         </div>
 
-        {/* ❌ Error */}
+        {/* Error */}
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm">
             {error}
@@ -205,7 +243,131 @@ export default function MemberDashboard() {
           </div>
         </section>
 
+        {/* Security */}
+<section>
+  <h2 className="text-lg font-semibold text-gray-800 mb-3">
+    Security
+  </h2>
+
+  <div className="bg-white rounded-2xl shadow">
+    {!showPwForm ? (
+      <div className="p-5 flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-gray-900">Password</p>
+          <p className="text-xs text-gray-600 mt-0.5">
+            Change your login password
+          </p>
+        </div>
+        <button
+          onClick={() => setShowPwForm(true)}
+          className="btn-secondary text-sm hover:bg-slate-400">
+          Change password
+        </button>
       </div>
+    ) : (
+      <form onSubmit={handleChangePassword} className="p-5 space-y-4">
+        {pwErr && (
+          <div className="px-3 py-2 bg-red-50 border border-red-200
+                          text-red-700 rounded-lg text-sm">
+            {pwErr}
+          </div>
+        )}
+        {pwSuccess && (
+          <div className="px-3 py-2 bg-green-50 border border-green-200
+                          text-green-700 rounded-lg text-sm">
+            {pwSuccess}
+          </div>
+        )}
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Current password
+          </label>
+          <input
+            type={showPw ? 'text' : 'password'}
+            className="input-field"
+            value={pwForm.current_password}
+            onChange={(e) => setPwForm({
+              ...pwForm, current_password: e.target.value
+            })}
+            required
+            autoFocus
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            New password
+          </label>
+          <input
+            type={showPw ? 'text' : 'password'}
+            className="input-field"
+            placeholder="Min. 8 characters"
+            value={pwForm.new_password}
+            onChange={(e) => setPwForm({
+              ...pwForm, new_password: e.target.value
+            })}
+            required
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Confirm new password
+          </label>
+          <input
+            type={showPw ? 'text' : 'password'}
+            className="input-field"
+            value={pwForm.confirm_password}
+            onChange={(e) => setPwForm({
+              ...pwForm, confirm_password: e.target.value
+            })}
+            required
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="showpw"
+            checked={showPw}
+            onChange={() => setShowPw(!showPw)}
+            className="cursor-pointer"
+          />
+          <label htmlFor="showpw" className="text-xs text-gray-500 cursor-pointer">
+            Show passwords
+          </label>
+        </div>
+
+        <div className="flex gap-3 pt-1">
+          <button
+            type="button"
+            onClick={() => {
+              setShowPwForm(false)
+              setPwErr('')
+              setPwForm({
+                current_password: '',
+                new_password: '',
+                confirm_password: '',
+              })
+            }}
+            className="btn-secondary flex-1">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={pwLoad}
+            className="btn-primary flex-1">
+            {pwLoad ? 'Saving...' : 'Change password'}
+          </button>
+        </div>
+      </form>
+    )}
+  </div>
+</section>
+
+      </div>
+
     </MemberLayout>
   )
 }
