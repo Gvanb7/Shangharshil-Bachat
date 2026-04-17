@@ -533,7 +533,7 @@ function AmountNoteFields({ form, setForm, label }) {
         <input
           type="text"
           className="input-field"
-          placeholder="e.g. Monthly deposit"
+          placeholder="Purpose of withdraw"
           value={form.note}
           onChange={(e) => setForm({ ...form, note: e.target.value })}
         />

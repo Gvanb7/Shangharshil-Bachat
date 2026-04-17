@@ -117,6 +117,8 @@ class AdminRegisterMemberView(APIView):
         email = request.data.get('email', '').strip().lower()
         password = request.data.get('password', '').strip()
         full_name = request.data.get('full_name', '').strip()
+        phone = request.data.get('phone', '').strip()
+        address = request.data.get('address', '').strip()
         
         if not email:
             return Response({'error': 'Email is required.'}, status=400)
@@ -129,7 +131,7 @@ class AdminRegisterMemberView(APIView):
         if User.objects.filter(email=email).exists():
             return Response({'error': 'This email is already registered.'}, status=400)
 
-        user = User.objects.create_user(email=email, password=password, full_name=full_name, role='member', is_active=True)
+        user = User.objects.create_user(email=email, password=password, full_name=full_name, phone = phone, address = address, role='member', is_active=True)
         return Response(
             {'message': f'Member {email} registered. They can now sign up via OTP.'},
             status=201,

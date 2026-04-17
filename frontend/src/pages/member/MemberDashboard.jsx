@@ -4,8 +4,7 @@ import useAuthStore from '../../store/authStore'
 import api from '../../lib/api'
 
 export default function MemberDashboard() {
-  const { user } = useAuthStore()
-
+  const { user, updateUser } = useAuthStore()
   const [savings, setSavings] = useState(null)
   const [loans, setLoans] = useState([])
   const [loading, setLoading] = useState(true)
@@ -28,13 +27,15 @@ export default function MemberDashboard() {
     setLoading(true)
     setError('')
     try {
-      const [savRes, loanRes] = await Promise.all([
+      const [savRes, loanRes, profileRes] = await Promise.all([
         api.get('/member/savings/').catch(() => null),
         api.get('/member/loans/').catch(() => null),
+        api.get('/auth/me/'),
       ])
 
       if (savRes) setSavings(savRes.data)
       if (loanRes) setLoans(loanRes.data)
+      if (profileRes) updateUser(profileRes.data)
     } catch {
       setError('Failed to load your data.')
     } finally {
