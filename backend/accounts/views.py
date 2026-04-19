@@ -6,7 +6,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .utils import create_and_send_otp, verify_otp
-from .serializers import UserProfileSerializer, AdminUserSerializer
+from .serializers import UserProfileSerializer, AdminUserSerializer, MemberUpdateProfileSerializer
 from .permissions import IsAdmin
 
 from rest_framework_simplejwt.views import TokenObtainPairView
@@ -93,11 +93,10 @@ class CompleteProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
     def patch(self, request):
-        user = request.user
-        serializer = UserProfileSerializer(user, data=request.data, partial=True)
+        serializer = MemberUpdateProfileSerializer(request.user, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data)
+            return Response(UserProfileSerializer(request.user).data)
         return Response(serializer.errors, status=400)
 
 

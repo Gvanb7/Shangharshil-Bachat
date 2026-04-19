@@ -19,6 +19,14 @@ export default function MemberDashboard() {
   const [pwLoad,      setPwLoad]      = useState(false)
   const [showPw,      setShowPw]      = useState(false)
 
+  const [editProfile,    setEditProfile]    = useState(false)
+  const [profileForm,    setProfileForm]    = useState({
+    full_name: '', phone: '', address: ''
+    })
+  const [profileErr,     setProfileErr]     = useState('')
+  const [profileLoad,    setProfileLoad]    = useState(false)
+  const [profileSuccess, setProfileSuccess] = useState('')
+
   useEffect(() => {
     fetchData()
   }, [])
@@ -42,6 +50,29 @@ export default function MemberDashboard() {
       setLoading(false)
     }
   }
+
+  async function handleUpdateProfile(e) {
+  e.preventDefault()
+  setProfileErr('')
+  setProfileSuccess('')
+  setProfileLoad(true)
+  try {
+    const res = await api.patch('/auth/complete-profile/', profileForm)
+    updateUser(res.data)
+    setProfileSuccess('Profile updated successfully.')
+    setEditProfile(false)
+  } catch (err) {
+    const data = err.response?.data
+    if (data && typeof data === 'object') {
+      const first = Object.values(data)[0]
+      setProfileErr(Array.isArray(first) ? first[0] : first)
+    } else {
+      setProfileErr('Failed to update profile.')
+    }
+  } finally {
+    setProfileLoad(false)
+  }
+}
 
   async function handleChangePassword(e) {
     e.preventDefault()
@@ -222,27 +253,134 @@ export default function MemberDashboard() {
         </section>
 
         {/* Profile */}
-        <section>
-          <h2 className="text-lg font-semibold text-gray-800 mb-3">
-            Profile
-          </h2>
+ <section>
+  <h2 className="text-lg font-semibold text-gray-800 mb-3">
+    Profile
+  </h2>
 
-          <div className="bg-blue-100 rounded-2xl shadow divide-y">
-            {[
-              ['Full Name', user?.full_name],
-              ['Email', user?.email],
-              ['Phone', user?.phone],
-              ['Address', user?.address],
-            ].map(([label, value]) => (
-              <div key={label} className="p-4 flex justify-between">
-                <span className="text-gray-500 text-sm">{label}</span>
-                <span className="text-gray-800 font-medium text-sm">
-                  {value || '—'}
-                </span>
-              </div>
-            ))}
+  {profileSuccess && (
+    <div className="mb-3 px-4 py-3 bg-green-50 border border-green-200
+                    text-green-700 rounded-lg text-sm">
+      {profileSuccess}
+    </div>
+  )}
+
+  <div className="bg-white rounded-2xl shadow overflow-hidden">
+    {!editProfile ? (
+      <>
+        <div className="divide-y divide-gray-100">
+          {[
+            ['Full name', user?.full_name],
+            ['Email',     user?.email],
+            ['Phone',     user?.phone],
+            ['Address',   user?.address],
+          ].map(([label, value]) => (
+            <div key={label} className="p-4 flex justify-between items-start gap-4">
+              <span className="text-gray-500 text-sm w-24 flex-shrink-0">
+                {label}
+              </span>
+              <span className="text-gray-800 font-medium text-sm text-right">
+                {value || (
+                  <span className="text-gray-400 italic text-xs">Not set</span>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="px-4 py-3 border-t border-gray-100">
+          <button
+            onClick={() => {
+              setProfileForm({
+                full_name: user?.full_name || '',
+                phone:     user?.phone     || '',
+                address:   user?.address   || '',
+              })
+              setProfileErr('')
+              setProfileSuccess('')
+              setEditProfile(true)
+            }}
+            className="btn-secondary text-sm w-full">
+            Edit profile
+          </button>
+        </div>
+      </>
+    ) : (
+      <form onSubmit={handleUpdateProfile} className="p-5 space-y-4">
+        {profileErr && (
+          <div className="px-3 py-2 bg-red-50 border border-red-200
+                          text-red-700 rounded-lg text-sm">
+            {profileErr}
           </div>
-        </section>
+        )}
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Full name <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            className="input-field"
+            value={profileForm.full_name}
+            onChange={(e) => setProfileForm({
+              ...profileForm, full_name: e.target.value
+            })}
+            required
+            autoFocus
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Phone
+          </label>
+          <input
+            type="tel"
+            className="input-field"
+            placeholder="98XXXXXXXX"
+            value={profileForm.phone}
+            onChange={(e) => setProfileForm({
+              ...profileForm, phone: e.target.value
+            })}
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Address
+          </label>
+          <textarea
+            className="input-field resize-none"
+            rows={2}
+            placeholder="Your address"
+            value={profileForm.address}
+            onChange={(e) => setProfileForm({
+              ...profileForm, address: e.target.value
+            })}
+          />
+        </div>
+
+        <div className="flex gap-3 pt-1">
+          <button
+            type="button"
+            onClick={() => {
+              setEditProfile(false)
+              setProfileErr('')
+            }}
+            className="btn-secondary flex-1">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={profileLoad}
+            className="btn-primary flex-1">
+            {profileLoad ? 'Saving...' : 'Save changes'}
+          </button>
+        </div>
+      </form>
+    )}
+  </div>
+ </section>
+
 
         {/* Security */}
 <section>
