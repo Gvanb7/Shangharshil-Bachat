@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import MemberLayout from '../../components/MemberLayout'
 import useAuthStore from '../../store/authStore'
 import api from '../../lib/api'
+import ProfilePicture from '../../components/ProfilePicture'
 
 export default function MemberDashboard() {
   const { user, updateUser } = useAuthStore()
@@ -124,6 +125,7 @@ export default function MemberDashboard() {
   return (
     <MemberLayout>
       <div className="space-y-6">
+        <div className="bg-white rounded-2xl shadow p-6 flex justify-center"><ProfilePicture /> </div>
 
         {/* Welcome + Summary */}
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl p-6 shadow">

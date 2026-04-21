@@ -7,6 +7,8 @@ urlpatterns = [
     path('auth/me/',            views.MeView.as_view()),
     path('auth/complete-profile/', views.CompleteProfileView.as_view()),
     path('auth/change-password/', views.MemberChangePasswordView.as_view()),
+    path('auth/profile-picture/', views.UpdateProfilePictureView.as_view()),
+    path('auth/profile-picture/delete/', views.DeleteProfilePictureView.as_view()),
 
     # Admin only
     path('admin/members/',           views.AdminListMembersView.as_view()),

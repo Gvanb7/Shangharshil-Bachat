@@ -1,3 +1,4 @@
+import os
 from django.contrib.auth import get_user_model
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -16,6 +17,8 @@ from django.contrib.auth import get_user_model
 
 from django_ratelimit.decorators import ratelimit
 from django.utils.decorators import method_decorator
+
+from rest_framework.parsers import MultiPartParser, FormParser
 
 User = get_user_model()
 
@@ -307,3 +310,61 @@ class AdminChangePasswordView(APIView):
         return Response({
             'message': f'Password reset successfully for {user.email}.'
         })
+        
+class UpdateProfilePictureView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes     = [MultiPartParser, FormParser]
+
+    def patch(self, request):
+        if 'profile_photo' not in request.FILES:
+            return Response(
+                {'error': 'No image file provided.'},
+                status=400
+            )
+
+        file = request.FILES['profile_photo']
+
+        # validate file type
+        allowed_types = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp']
+        if file.content_type not in allowed_types:
+            return Response(
+                {'error': 'Only JPEG, PNG and WebP images are allowed.'},
+                status=400
+            )
+
+        # validate file size — max 2MB
+        if file.size > 2 * 1024 * 1024:
+            return Response(
+                {'error': 'Image size must be less than 2MB.'},
+                status=400
+            )
+
+        # delete old photo if exists
+        user = request.user
+        if user.profile_photo:
+            if os.path.isfile(user.profile_photo.path):
+                os.remove(user.profile_photo.path)
+
+        user.profile_photo = file
+        user.save()
+
+        return Response(UserProfileSerializer(user).data)
+
+
+class DeleteProfilePictureView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        user = request.user
+        if not user.profile_photo:
+            return Response(
+                {'error': 'No profile picture to delete.'},
+                status=400
+            )
+
+        if os.path.isfile(user.profile_photo.path):
+            os.remove(user.profile_photo.path)
+
+        user.profile_photo = None
+        user.save()
+        return Response({'message': 'Profile picture removed.'})

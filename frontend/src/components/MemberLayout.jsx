@@ -1,9 +1,13 @@
 import { useNavigate } from 'react-router-dom'
 import useAuthStore from '../store/authStore'
 
+const API_BASE = import.meta.env.VITE_API_URL?.replace('/api', '')
+
 export default function MemberLayout({ children, title }) {
   const navigate       = useNavigate()
   const { user, logout } = useAuthStore()
+
+  const photoUrl = user?.profile_photo ? '${API_BASE}${user.profile_photo}' : null
 
   function handleLogout() {
     logout()
@@ -32,6 +36,7 @@ export default function MemberLayout({ children, title }) {
             </p>
             <p className="text-primary-300 text-xs">{user?.email}</p>
           </div>
+          
           <button
             onClick={handleLogout}
             className="text-xs bg-primary-700 hover:bg-red-700

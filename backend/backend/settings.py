@@ -114,7 +114,7 @@ TEMPLATES = [
 WSGI_APPLICATION = 'backend.wsgi.application'
 
 SECRET_KEY = config('SECRET_KEY')
-DEBUG = config('DEBUG') == 'False'
+DEBUG = config('DEBUG', cast=bool, default=True)
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
@@ -221,3 +221,6 @@ REST_FRAMEWORK = {
 }
 
 AUTH_USER_MODEL = 'accounts.User'   
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
