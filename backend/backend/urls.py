@@ -22,7 +22,7 @@ from django.views.decorators.csrf import csrf_exempt
 from rest_framework_simplejwt.views import TokenRefreshView
 
 urlpatterns = [
-    path('django-admin/', admin.site.urls),
+    path('admin/', admin.site.urls),
     path('api/', include('accounts.urls')),
     path('api/', include('main.urls')),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),

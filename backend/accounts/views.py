@@ -19,6 +19,7 @@ from django_ratelimit.decorators import ratelimit
 from django.utils.decorators import method_decorator
 
 from rest_framework.parsers import MultiPartParser, FormParser
+from .email_service import send_welcome_email, send_password_reset_email
 
 User = get_user_model()
 
@@ -134,9 +135,15 @@ class AdminRegisterMemberView(APIView):
             return Response({'error': 'This email is already registered.'}, status=400)
 
         user = User.objects.create_user(email=email, password=password, full_name=full_name, phone = phone, address = address, role='member', is_active=True)
-        return Response(
-            {'message': f'Member {email} registered. They can now sign up via OTP.'},
-            status=201,
+        
+        #send welcome email with credentials
+        email_sent, email_msg = send_welcome_email(email, full_name, password)
+        return Response({
+            'message': f'Member {email} registered successfully.',
+            'email_sent': email_sent,
+            'email_note': email_msg if not email_sent else 'Credentials sent to member email',
+            'user': AdminUserSerializer(user).data,
+         }, status=201,
         )
         
 class MemberLoginView(APIView):
@@ -307,8 +314,15 @@ class AdminChangePasswordView(APIView):
 
         user.set_password(new_password)
         user.save()
+        
+        #send password reset email
+        email_sent, email_msg = send_password_reset_email(
+            user.email, user.full_name, new_password
+        )
         return Response({
-            'message': f'Password reset successfully for {user.email}.'
+            'message': f'Password reset successfully for {user.email}.',
+            'email_sent': email_sent,
+            'email_note': email_msg if not email_sent else 'New password sent to member email'
         })
         
 class UpdateProfilePictureView(APIView):
