@@ -26,6 +26,7 @@ class SavingsAccount(models.Model):
     is_active      = models.BooleanField(default=True)
     created_at     = models.DateTimeField(auto_now_add=True)
     updated_at     = models.DateTimeField(auto_now=True)
+    last_interest_date = models.DateField(null=True, blank=True)
 
     class Meta:
         ordering = ['opened_on']

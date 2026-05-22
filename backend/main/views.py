@@ -121,17 +121,40 @@ class AdminApplyInterestView(APIView):
     def post(self, request):
         accounts = SavingsAccount.objects.filter(is_active=True)
         results  = []
+        applied  = []
+        already_done = []
+        zero_balance = []
+        
         for account in accounts:
-            txn = apply_interest_to_account(account, request.user)
-            if txn:
-                results.append({
+            txn, status = apply_interest_to_account(account, request.user)
+            if status == 'success':
+                applied.append({
                     'member':   account.member.full_name,
                     'interest': str(txn.amount),
                     'balance':  str(account.balance),
                 })
+            elif status == 'already_applied':
+                already_done.append(
+                    account.member.full_name or account.member.email
+                )
+            elif status == 'zero_balance':
+                zero_balance.append(
+                    account.member.full_name or account.member.email
+                )
+                
+        if already_done and not applied:
+            return Response({
+                'status': 'already_applied',
+                'message': 'Interest has already been applied this month for all accounts.',
+                'details': already_done,
+            }, status=400)
+            
         return Response({
-            'message': f'Interest applied to {len(results)} accounts.',
-            'details': results,
+            'status': 'success',
+            'message': f'Interest applied to {len(applied)} account(s).',
+            'applied': applied,
+            'applied_done': already_done,
+            'zero_balance': zero_balance
         })
 
 

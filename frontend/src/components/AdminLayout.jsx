@@ -25,7 +25,7 @@ export default function AdminLayout({ children }) {
     <div className="min-h-screen bg-gray-50 flex">
 
       {/* Sidebar */}
-      <aside className={`${sidebarOpen ? 'w-56' : 'w-16'} bg-primary-900 
+      <aside className={`${sidebarOpen ? 'w-56' : 'w-16'} bg-primary-500 
                          transition-all duration-300 flex flex-col flex-shrink-0`}>
 
         {/* Logo */}

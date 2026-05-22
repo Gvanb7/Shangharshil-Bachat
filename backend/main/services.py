@@ -25,13 +25,23 @@ def apply_interest_to_account(account, recorded_by):
     Creates a transaction record. Called by admin each month.
     """
     from .models import SavingsTransaction
+    from django.utils import timezone
+    
+    today = timezone.now().date()
+    
+   # prevent double application in same month
+    if account.last_interest_date:
+       if (account.last_interest_date.year == today.year and
+           account.last_interest_date.month == today.month):
+           return None, 'already_applied'
 
     interest = calculate_monthly_interest(account.balance, account.interest_rate)
 
     if interest <= Decimal('0.00'):
-        return None
+        return None, 'zero_balance'
 
     account.balance += interest
+    account.last_interest_date = today
     account.save()
 
     transaction = SavingsTransaction.objects.create(
@@ -42,7 +52,7 @@ def apply_interest_to_account(account, recorded_by):
         note=f'Monthly interest at {account.interest_rate}% p.a.',
         recorded_by=recorded_by,
     )
-    return transaction
+    return transaction, 'success'
 
 
 def deposit_to_savings(account, amount, recorded_by, note=''):

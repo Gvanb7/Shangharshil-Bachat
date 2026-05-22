@@ -11,6 +11,8 @@ export default function AdminSavings() {
   const [loading,     setLoading]     = useState(true)
   const [error,       setError]       = useState('')
   const [successMsg,  setSuccessMsg]  = useState('')
+  const [showInterestModal, setShowInterestModal] = useState(false)
+  const [interestResult,    setInterestResult]    = useState(null)
 
   // selected account for transactions
   const [selected,    setSelected]    = useState(null)
@@ -156,20 +158,25 @@ export default function AdminSavings() {
   }
 
   async function handleApplyInterest() {
-    if (!window.confirm(
-      'Apply monthly interest to ALL active savings accounts?'
-    )) return
-    setInterestLoad(true)
-    try {
-      const res = await api.post('/savings/apply-interest/')
-      flash(res.data.message)
-      fetchAll()
-      if (selected) fetchTxns(selected.id)
-    } catch {
-      setError('Failed to apply interest.')
-    } finally {
-      setInterestLoad(false)
-    }
+   setInterestLoad(true)
+   setError('')
+   try {
+     const res = await api.post('/savings/apply-interest/')
+     setInterestResult(res.data)
+     setShowInterestModal(true)
+     fetchAll()
+     if (selected) fetchTxns(selected.id)
+   } catch (err) {
+     const data = err.response?.data
+     if (data?.status === 'already_applied') {
+       setInterestResult(data)
+       setShowInterestModal(true)
+     } else {
+       setError('Failed to apply interest.')
+     }
+   } finally {
+     setInterestLoad(false)
+   }
   }
 
   function fmt(amount) {
@@ -210,7 +217,10 @@ export default function AdminSavings() {
           </div>
           <div className="flex gap-2 flex-wrap">
             <button
-              onClick={handleApplyInterest}
+              onClick={() =>{
+                setInterestResult(null)
+                setShowInterestModal(true)
+              }}
               disabled={interestLoad}
               className="btn-secondary text-sm">
               {interestLoad ? 'Applying...' : '+ Apply monthly interest'}
@@ -472,7 +482,150 @@ export default function AdminSavings() {
         </Modal>
       )}
 
-    </AdminLayout>
+          {/* Interest modal — confirm or show result */}
+    {showInterestModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center
+                      bg-black bg-opacity-40 px-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+
+          {!interestResult ? (
+            // confirmation screen
+            <>
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h3 className="font-semibold text-gray-800">
+                  Apply monthly interest
+                </h3>
+              </div>
+              <div className="px-6 py-5 space-y-4">
+                <div className="bg-yellow-50 border border-yellow-200
+                                rounded-lg px-4 py-3">
+                  <p className="text-sm text-yellow-800 font-medium">
+                    ⚠️ This will credit interest to all active savings accounts.
+                  </p>
+                  <p className="text-xs text-yellow-700 mt-1">
+                    Each account can only receive interest once per month.
+                    This action cannot be undone.
+                  </p>
+                </div>
+                <p className="text-sm text-gray-600">
+                  Active accounts: <strong>{accounts.filter(a => a.is_active).length}</strong>
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowInterestModal(false)}
+                    className="btn-secondary flex-1">
+                    Cancel
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setShowInterestModal(false)
+                      await handleApplyInterest()
+                    }}
+                    disabled={interestLoad}
+                    className="btn-primary flex-1">
+                    {interestLoad ? 'Applying...' : 'Confirm & Apply'}
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            // result screen
+            <>
+              <div className="px-6 py-4 border-b border-gray-200 flex
+                              items-center justify-between">
+                <h3 className="font-semibold text-gray-800">
+                  Interest application result
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowInterestModal(false)
+                    setInterestResult(null)
+                  }}
+                  className="text-gray-400 hover:text-gray-600 text-xl">
+                  ✕
+                </button>
+              </div>
+              <div className="px-6 py-5 space-y-4 max-h-96 overflow-y-auto">
+
+                {/* Status banner */}
+                {interestResult.status === 'already_applied' ? (
+                  <div className="bg-yellow-50 border border-yellow-200
+                                  rounded-lg px-4 py-3">
+                    <p className="text-sm text-yellow-800 font-medium">
+                      ⚠️ Already applied this month
+                    </p>
+                    <p className="text-xs text-yellow-700 mt-1">
+                      Interest has already been credited to all accounts
+                      this month.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="bg-green-50 border border-green-200
+                                  rounded-lg px-4 py-3">
+                    <p className="text-sm text-green-800 font-medium">
+                      ✓ {interestResult.message}
+                    </p>
+                  </div>
+                )}
+
+                {/* Applied accounts */}
+                {interestResult.applied?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500
+                                  uppercase tracking-wide mb-2">
+                      Interest credited
+                    </p>
+                    <div className="space-y-1">
+                      {interestResult.applied.map((a, i) => (
+                        <div key={i}
+                          className="flex justify-between text-sm
+                                    py-1.5 border-b border-gray-100">
+                          <span className="text-gray-700">{a.member}</span>
+                          <span className="text-green-600 font-medium">
+                            +Rs. {a.interest}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Already done */}
+                {interestResult.already_done?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500
+                                  uppercase tracking-wide mb-2">
+                      Already applied this month
+                    </p>
+                    <div className="space-y-1">
+                      {interestResult.already_done.map((name, i) => (
+                        <p key={i} className="text-sm text-gray-500 py-1">
+                          {name}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+              </div>
+              <div className="px-6 py-4 border-t border-gray-100">
+                <button
+                  onClick={() => {
+                    setShowInterestModal(false)
+                    setInterestResult(null)
+                  }}
+                  className="btn-primary w-full">
+                  Done
+                </button>
+              </div>
+            </>
+          )}
+
+        </div>
+      </div>
+    )}
+
+  </AdminLayout>
   )
 }
 

@@ -55,10 +55,9 @@ export default function LoginPage() {
         {/* Card */}
         <div className="card shadow-2xl">
           <div className="card-header">
-            <h2 className="text-lg font-semibold text-gray-800">Sign in</h2>
-            <p className="text-sm text-gray-500 mt-0.5">
+            <h2 className="text-lg font-semibold text-gray-800">
               Enter your credentials to continue
-            </p>
+            </h2>
           </div>
 
           <div className="card-body">
@@ -77,7 +76,7 @@ export default function LoginPage() {
                 <input
                   type="email"
                   className="input-field"
-                  placeholder="your@email.com"
+                  placeholder="your@gmail.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
