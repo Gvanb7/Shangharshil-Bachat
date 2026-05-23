@@ -161,19 +161,32 @@ class LoanRepayment(models.Model):
     def __str__(self):
         return f'Repayment Rs.{self.amount_paid} — Loan {self.loan.id}'
 
+    
+class ExpenditureCategory(models.Model):
+    id         = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name       = models.CharField(max_length=100, unique=True)
+    created_by = models.ForeignKey(
+                     settings.AUTH_USER_MODEL,
+                     on_delete=models.SET_NULL,
+                     null=True,
+                     related_name='created_categories'
+                 )
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_active  = models.BooleanField(default=True)
 
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+    
 class Expenditure(models.Model):
-    CATEGORY_CHOICES = (
-        ('office',      'Office Expenses'),
-        ('salary',      'Staff Salary'),
-        ('utility',     'Utility Bills'),
-        ('maintenance', 'Maintenance'),
-        ('event',       'Event / Meeting'),
-        ('other',       'Other'),
-    )
-
     id           = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    category     = models.CharField(max_length=20, choices=CATEGORY_CHOICES)
+    category     = models.ForeignKey(
+                       ExpenditureCategory,
+                       on_delete= models.PROTECT,
+                       related_name= 'expenditures'
+                )
     amount       = models.DecimalField(
                        max_digits=12, decimal_places=2,
                        validators=[MinValueValidator(Decimal('0.01'))]

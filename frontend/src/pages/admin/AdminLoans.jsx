@@ -9,25 +9,25 @@ const EMPTY_LOAN_FORM = {
 const EMPTY_REPAY_FORM = { amount: '', note: '' }
 
 export default function AdminLoans() {
-  const [loans,       setLoans]       = useState([])
-  const [members,     setMembers]     = useState([])
-  const [loading,     setLoading]     = useState(true)
-  const [error,       setError]       = useState('')
-  const [successMsg,  setSuccessMsg]  = useState('')
-  const [statusFilter,setStatusFilter]= useState('all')
-  const [search,      setSearch]      = useState('')
+  const [loans,        setLoans]        = useState([])
+  const [members,      setMembers]      = useState([])
+  const [loading,      setLoading]      = useState(true)
+  const [error,        setError]        = useState('')
+  const [successMsg,   setSuccessMsg]   = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [search,       setSearch]       = useState('')
 
-  const [selected,    setSelected]    = useState(null)
-  const [repayments,  setRepayments]  = useState([])
-  const [repayLoad,   setRepayLoad]   = useState(false)
+  const [selected,   setSelected]   = useState(null)
+  const [repayments, setRepayments] = useState([])
+  const [repayLoad,  setRepayLoad]  = useState(false)
 
-  const [showCreate,  setShowCreate]  = useState(false)
-  const [showRepay,   setShowRepay]   = useState(false)
-  const [loanForm,    setLoanForm]    = useState(EMPTY_LOAN_FORM)
-  const [repayForm,   setRepayForm]   = useState(EMPTY_REPAY_FORM)
-  const [formErr,     setFormErr]     = useState('')
-  const [formLoad,    setFormLoad]    = useState(false)
-  const [emiPreview,  setEmiPreview]  = useState(null)
+  const [showCreate, setShowCreate] = useState(false)
+  const [showRepay,  setShowRepay]  = useState(false)
+  const [loanForm,   setLoanForm]   = useState(EMPTY_LOAN_FORM)
+  const [repayForm,  setRepayForm]  = useState(EMPTY_REPAY_FORM)
+  const [formErr,    setFormErr]    = useState('')
+  const [formLoad,   setFormLoad]   = useState(false)
+  const [emiPreview, setEmiPreview] = useState(null)
 
   useEffect(() => { fetchAll() }, [])
 
@@ -78,7 +78,6 @@ export default function AdminLoans() {
     setEmiPreview(null)
   }
 
-  // live EMI preview
   function updateLoanForm(updated) {
     setLoanForm(updated)
     const { principal, interest_rate, term_months } = updated
@@ -92,11 +91,7 @@ export default function AdminLoans() {
       } else {
         const factor = Math.pow(1 + r, n)
         const emi    = p * r * factor / (factor - 1)
-        setEmiPreview({
-          emi,
-          total:    emi * n,
-          interest: emi * n - p,
-        })
+        setEmiPreview({ emi, total: emi * n, interest: emi * n - p })
       }
     } else {
       setEmiPreview(null)
@@ -127,7 +122,9 @@ export default function AdminLoans() {
   }
 
   async function handleApprove(loan) {
-    if (!window.confirm(`Approve loan of Rs. ${loan.principal} for ${loan.member_name}?`)) return
+    if (!window.confirm(
+      `Approve loan of Rs. ${loan.principal} for ${loan.member_name}?`
+    )) return
     try {
       await api.post(`/loans/${loan.id}/approve/`)
       flash('Loan approved.')
@@ -142,7 +139,9 @@ export default function AdminLoans() {
   }
 
   async function handleReject(loan) {
-    if (!window.confirm(`Reject loan of Rs. ${loan.principal} for ${loan.member_name}?`)) return
+    if (!window.confirm(
+      `Reject loan of Rs. ${loan.principal} for ${loan.member_name}?`
+    )) return
     try {
       await api.post(`/loans/${loan.id}/reject/`)
       flash('Loan rejected.')
@@ -238,7 +237,9 @@ export default function AdminLoans() {
               Outstanding {fmt(totalActive)}
             </p>
           </div>
-          <button onClick={() => setShowCreate(true)} className="btn-primary text-sm">
+          <button
+            onClick={() => setShowCreate(true)}
+            className="btn-primary text-sm">
             + New loan
           </button>
         </div>
@@ -304,7 +305,8 @@ export default function AdminLoans() {
                 <div
                   key={loan.id}
                   onClick={() => selectLoan(loan)}
-                  className={`px-4 py-3 cursor-pointer transition-colors hover:bg-gray-50
+                  className={`px-4 py-3 cursor-pointer transition-colors
+                              hover:bg-gray-50
                     ${selected?.id === loan.id
                       ? 'bg-primary-50 border-l-4 border-primary-500'
                       : ''}`}>
@@ -335,7 +337,6 @@ export default function AdminLoans() {
                     </div>
                   </div>
 
-                  {/* Action buttons inline */}
                   {loan.status === 'pending' && (
                     <div className="flex gap-2 mt-2"
                       onClick={(e) => e.stopPropagation()}>
@@ -374,115 +375,17 @@ export default function AdminLoans() {
                 ← Select a loan to view details
               </div>
             ) : (
-              <>
-                <div className="card-header">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="font-semibold text-gray-800 text-sm">
-                        {selected.member_name}
-                      </h3>
-                      <span className={`${STATUS_BADGE[selected.status]} mt-1`}>
-                        {selected.status}
-                      </span>
-                    </div>
-                    {selected.status === 'active' && (
-                      <button
-                        onClick={() => { setShowRepay(true); setFormErr('') }}
-                        className="btn-primary text-xs py-1.5">
-                        Record repayment
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Loan summary */}
-                <div className="px-4 py-3 grid grid-cols-2 gap-3 border-b
-                                border-gray-100 bg-gray-50">
-                  {[
-                    ['Principal',     fmt(selected.principal)],
-                    ['Interest rate', `${selected.interest_rate}% p.a.`],
-                    ['Term',          `${selected.term_months} months`],
-                    ['Monthly EMI',   fmt(selected.monthly_installment)],
-                    ['Total payable', fmt(selected.total_payable)],
-                    ['Amount paid',   fmt(selected.amount_paid)],
-                    ['Remaining',     fmt(selected.amount_remaining)],
-                    ['Due date',      selected.due_date || '—'],
-                  ].map(([label, value]) => (
-                    <div key={label}>
-                      <p className="text-xs text-gray-500">{label}</p>
-                      <p className="text-sm font-semibold text-gray-800">{value}</p>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Progress bar */}
-                {selected.status === 'active' && (
-                  <div className="px-4 py-3 border-b border-gray-100">
-                    <div className="flex justify-between text-xs text-gray-500 mb-1">
-                      <span>Repayment progress</span>
-                      <span>
-                        {((parseFloat(selected.amount_paid) /
-                          parseFloat(selected.total_payable)) * 100).toFixed(1)}%
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className="bg-green-500 h-2 rounded-full transition-all"
-                        style={{
-                          width: `${Math.min(
-                            (parseFloat(selected.amount_paid) /
-                             parseFloat(selected.total_payable)) * 100, 100
-                          )}%`
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Repayments */}
-                <div className="divide-y divide-gray-100 max-h-64 overflow-y-auto">
-                  <div className="px-4 py-2 bg-gray-50">
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                      Repayment history
-                    </p>
-                  </div>
-                  {repayLoad ? (
-                    <div className="px-4 py-6 text-center text-gray-400 text-sm">
-                      Loading...
-                    </div>
-                  ) : repayments.length === 0 ? (
-                    <div className="px-4 py-6 text-center text-gray-400 text-sm">
-                      No repayments yet.
-                    </div>
-                  ) : repayments.map((r) => (
-                    <div key={r.id} className="px-4 py-3">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-gray-800">
-                            {fmt(r.amount_paid)}
-                          </p>
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            Principal: {fmt(r.principal_portion)} ·
-                            Interest: {fmt(r.interest_portion)}
-                          </p>
-                          <p className="text-xs text-gray-400">
-                            {new Date(r.paid_at).toLocaleDateString('en-NP')}
-                            {r.note && ` · ${r.note}`}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-xs text-gray-500">Balance</p>
-                          <p className="text-sm font-semibold text-gray-700">
-                            {fmt(r.balance_after)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
+              <LoanDetailPanel
+                selected={selected}
+                repayments={repayments}
+                repayLoad={repayLoad}
+                onRepay={() => { setShowRepay(true); setFormErr('') }}
+                fmt={fmt}
+                STATUS_BADGE={STATUS_BADGE}
+              />
             )}
           </div>
+
         </div>
       </div>
 
@@ -499,7 +402,9 @@ export default function AdminLoans() {
               <select
                 className="input-field"
                 value={loanForm.member}
-                onChange={(e) => updateLoanForm({ ...loanForm, member: e.target.value })}
+                onChange={(e) => updateLoanForm({
+                  ...loanForm, member: e.target.value
+                })}
                 required>
                 <option value="">Select member...</option>
                 {members.map(m => (
@@ -522,7 +427,9 @@ export default function AdminLoans() {
                   className="input-field"
                   placeholder="10000.00"
                   value={loanForm.principal}
-                  onChange={(e) => updateLoanForm({ ...loanForm, principal: e.target.value })}
+                  onChange={(e) => updateLoanForm({
+                    ...loanForm, principal: e.target.value
+                  })}
                   required
                 />
               </div>
@@ -537,7 +444,9 @@ export default function AdminLoans() {
                   className="input-field"
                   placeholder="12.00"
                   value={loanForm.interest_rate}
-                  onChange={(e) => updateLoanForm({ ...loanForm, interest_rate: e.target.value })}
+                  onChange={(e) => updateLoanForm({
+                    ...loanForm, interest_rate: e.target.value
+                  })}
                   required
                 />
               </div>
@@ -554,7 +463,9 @@ export default function AdminLoans() {
                 className="input-field"
                 placeholder="12"
                 value={loanForm.term_months}
-                onChange={(e) => updateLoanForm({ ...loanForm, term_months: e.target.value })}
+                onChange={(e) => updateLoanForm({
+                  ...loanForm, term_months: e.target.value
+                })}
                 required
               />
             </div>
@@ -568,11 +479,12 @@ export default function AdminLoans() {
                 rows={2}
                 placeholder="e.g. Business expansion"
                 value={loanForm.purpose}
-                onChange={(e) => updateLoanForm({ ...loanForm, purpose: e.target.value })}
+                onChange={(e) => updateLoanForm({
+                  ...loanForm, purpose: e.target.value
+                })}
               />
             </div>
 
-            {/* Live EMI preview */}
             {emiPreview && (
               <div className="bg-blue-50 border border-blue-100 rounded-lg
                               px-4 py-3 grid grid-cols-3 gap-3">
@@ -589,7 +501,11 @@ export default function AdminLoans() {
               </div>
             )}
 
-            <ModalButtons onCancel={closeAll} loading={formLoad} label="Create loan" />
+            <ModalButtons
+              onCancel={closeAll}
+              loading={formLoad}
+              label="Create loan"
+            />
           </form>
         </Modal>
       )}
@@ -626,7 +542,9 @@ export default function AdminLoans() {
                 className="input-field"
                 placeholder={selected.monthly_installment}
                 value={repayForm.amount}
-                onChange={(e) => setRepayForm({ ...repayForm, amount: e.target.value })}
+                onChange={(e) => setRepayForm({
+                  ...repayForm, amount: e.target.value
+                })}
                 required
                 autoFocus
               />
@@ -640,7 +558,9 @@ export default function AdminLoans() {
                 className="input-field"
                 placeholder="e.g. April installment"
                 value={repayForm.note}
-                onChange={(e) => setRepayForm({ ...repayForm, note: e.target.value })}
+                onChange={(e) => setRepayForm({
+                  ...repayForm, note: e.target.value
+                })}
               />
             </div>
             <ModalButtons
@@ -653,6 +573,269 @@ export default function AdminLoans() {
       )}
 
     </AdminLayout>
+  )
+}
+
+// ── Loan detail panel ─────────────────────────────────────────────────────────
+
+function LoanDetailPanel({
+  selected, repayments, repayLoad, onRepay, fmt, STATUS_BADGE
+}) {
+  const [schedule,     setSchedule]     = useState([])
+  const [scheduleLoad, setScheduleLoad] = useState(false)
+  const [activeTab,    setActiveTab]    = useState('history')
+
+  useEffect(() => {
+    if (selected?.status === 'active' || selected?.status === 'closed') {
+      fetchSchedule()
+    }
+    setActiveTab('history')
+  }, [selected?.id])
+
+  async function fetchSchedule() {
+    setScheduleLoad(true)
+    try {
+      const res = await api.get(`/loans/${selected.id}/schedule/`)
+      setSchedule(res.data)
+    } catch {
+      setSchedule([])
+    } finally {
+      setScheduleLoad(false)
+    }
+  }
+
+  const progress = parseFloat(selected.total_payable) > 0
+    ? (parseFloat(selected.amount_paid) /
+       parseFloat(selected.total_payable)) * 100
+    : 0
+
+  const paidMonths   = schedule.filter(s => s.is_paid).length
+  const unpaidMonths = schedule.filter(s => !s.is_paid).length
+
+  const showTabs = selected.status === 'active' || selected.status === 'closed'
+
+  return (
+    <>
+      {/* Header */}
+      <div className="card-header">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-gray-800 text-sm">
+              {selected.member_name}
+            </h3>
+            <span className={`${STATUS_BADGE[selected.status]} mt-1`}>
+              {selected.status}
+            </span>
+          </div>
+          {selected.status === 'active' && (
+            <button
+              onClick={onRepay}
+              className="btn-primary text-xs py-1.5">
+              Record repayment
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Overview cards */}
+      <div className="px-4 py-3 grid grid-cols-2 gap-2 border-b border-gray-100">
+        {[
+          ['Principal',     fmt(selected.principal),            'text-gray-800'],
+          ['Interest rate', `${selected.interest_rate}% p.a.`,  'text-gray-800'],
+          ['Term',          `${selected.term_months} months`,   'text-gray-800'],
+          ['Monthly EMI',   fmt(selected.monthly_installment),  'text-blue-700'],
+          ['Total payable', fmt(selected.total_payable),        'text-gray-800'],
+          ['Amount paid',   fmt(selected.amount_paid),          'text-green-700'],
+          ['Remaining',     fmt(selected.amount_remaining),     'text-red-600'],
+          ['Due date',      selected.due_date || '—',           'text-gray-800'],
+        ].map(([label, value, color]) => (
+          <div key={label} className="bg-gray-50 rounded-lg px-3 py-2">
+            <p className="text-xs text-gray-500">{label}</p>
+            <p className={`text-sm font-semibold ${color}`}>{value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Progress bar */}
+      {showTabs && (
+        <div className="px-4 py-3 border-b border-gray-100">
+          <div className="flex justify-between text-xs text-gray-500 mb-1">
+            <span>
+              {paidMonths} of {selected.term_months} installments paid
+            </span>
+            <span>{progress.toFixed(1)}%</span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-2">
+            <div
+              className="bg-green-500 h-2 rounded-full transition-all"
+              style={{ width: `${Math.min(progress, 100)}%` }}
+            />
+          </div>
+          {unpaidMonths > 0 && selected.status === 'active' && (
+            <p className="text-xs text-red-500 mt-1">
+              {unpaidMonths} installment{unpaidMonths > 1 ? 's' : ''} remaining
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Tabs */}
+      {showTabs && (
+        <div className="flex border-b border-gray-200">
+          {[
+            { key: 'history',  label: 'Repayment history' },
+            { key: 'schedule', label: 'Monthly schedule'  },
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex-1 py-2.5 text-xs font-medium transition-colors
+                          border-b-2
+                          ${activeTab === tab.key
+                            ? 'border-primary-600 text-primary-600'
+                            : 'border-transparent text-gray-500 hover:text-gray-700'
+                          }`}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Tab content */}
+      <div className="max-h-72 overflow-y-auto">
+
+        {/* Repayment history — default tab + shown for pending/approved/rejected */}
+        {(!showTabs || activeTab === 'history') && (
+          <div className="divide-y divide-gray-100">
+            {!showTabs && (
+              <div className="px-4 py-2 bg-gray-50">
+                <p className="text-xs font-semibold text-gray-500
+                               uppercase tracking-wide">
+                  Repayment history
+                </p>
+              </div>
+            )}
+            {repayLoad ? (
+              <div className="px-4 py-6 text-center text-gray-400 text-sm">
+                Loading...
+              </div>
+            ) : repayments.length === 0 ? (
+              <div className="px-4 py-6 text-center text-gray-400 text-sm">
+                No repayments yet.
+              </div>
+            ) : repayments.map((r) => (
+              <div key={r.id} className="px-4 py-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">
+                      {fmt(r.amount_paid)}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Principal: {fmt(r.principal_portion)} ·
+                      Interest: {fmt(r.interest_portion)}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {new Date(r.paid_at).toLocaleDateString('en-NP')}
+                      {r.note && ` · ${r.note}`}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-gray-500">Balance</p>
+                    <p className="text-sm font-semibold text-gray-700">
+                      {fmt(r.balance_after)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Monthly schedule tab */}
+        {showTabs && activeTab === 'schedule' && (
+          <>
+            {scheduleLoad ? (
+              <div className="px-4 py-6 text-center text-gray-400 text-sm">
+                Loading schedule...
+              </div>
+            ) : schedule.length === 0 ? (
+              <div className="px-4 py-6 text-center text-gray-400 text-sm">
+                No schedule available.
+              </div>
+            ) : (
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 sticky top-0 z-10">
+                  <tr>
+                    {['Mo.', 'Due date', 'EMI', 'Principal',
+                      'Interest', 'Balance', 'Status'].map(h => (
+                      <th key={h}
+                        className="px-2 py-2 text-left text-gray-500
+                                   font-semibold uppercase tracking-wide
+                                   whitespace-nowrap border-b border-gray-200">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {schedule.map((s) => {
+                    const isOverdue = !s.is_paid &&
+                      new Date(s.due_date) < new Date()
+                    return (
+                      <tr key={s.month}
+                        className={`transition-colors
+                          ${s.is_paid
+                            ? 'bg-green-50'
+                            : isOverdue
+                              ? 'bg-red-50'
+                              : 'hover:bg-gray-50'
+                          }`}>
+                        <td className="px-2 py-2 font-medium text-gray-700">
+                          {s.month}
+                        </td>
+                        <td className="px-2 py-2 text-gray-600 whitespace-nowrap">
+                          {s.due_date}
+                        </td>
+                        <td className="px-2 py-2 font-semibold text-gray-800
+                                       whitespace-nowrap">
+                          {fmt(s.emi)}
+                        </td>
+                        <td className="px-2 py-2 text-blue-700 whitespace-nowrap">
+                          {fmt(s.principal_portion)}
+                        </td>
+                        <td className="px-2 py-2 text-orange-600 whitespace-nowrap">
+                          {fmt(s.interest_portion)}
+                        </td>
+                        <td className="px-2 py-2 text-gray-600 whitespace-nowrap">
+                          {fmt(s.balance_after)}
+                        </td>
+                        <td className="px-2 py-2 whitespace-nowrap">
+                          {s.is_paid ? (
+                            <div>
+                              <span className="badge-success">✓ Paid</span>
+                              {s.paid_at && (
+                                <p className="text-gray-400 mt-0.5 text-xs">
+                                  {s.paid_at}
+                                </p>
+                              )}
+                            </div>
+                          ) : isOverdue ? (
+                            <span className="badge-danger">Overdue</span>
+                          ) : (
+                            <span className="badge-warning">Upcoming</span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+          </>
+        )}
+
+      </div>
+    </>
   )
 }
 

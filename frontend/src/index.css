@@ -65,3 +65,9 @@
            text-xs font-medium bg-gray-100 text-gray-800;
   }
 }
+
+@layer utilities {
+  .table-scroll {
+    @apply overflow-x-auto -mx-4 sm:mx-0;
+  }
+}

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from decimal import Decimal
-from .models import SavingsAccount, SavingsTransaction, Loan, LoanRepayment, Expenditure
+from .models import SavingsAccount, SavingsTransaction, Loan, LoanRepayment, Expenditure, ExpenditureCategory
 from .services import calculate_loan_summary
 
 class SavingsAccountSerializer(serializers.ModelSerializer):
@@ -87,7 +87,9 @@ class RepaymentInputSerializer(serializers.Serializer):
 
 class ExpenditureSerializer(serializers.ModelSerializer):
     recorded_by_name = serializers.CharField(source='recorded_by.full_name', read_only=True)
-
+    category_name = serializers.CharField(
+        source = 'category.name', read_only = True
+    )
     class Meta:
         model  = Expenditure
         fields = [
@@ -96,4 +98,24 @@ class ExpenditureSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'recorded_by', 'created_at']
         
-    
+
+class ExpenditureCategorySerializer(serializers.ModelSerializer):
+    expenditure_count = serializers.IntegerField(
+        source='expenditures.count',
+        read_only=True
+    )
+
+    class Meta:
+        model  = ExpenditureCategory
+        fields = ['id', 'name', 'is_active', 'expenditure_count', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('Category name cannot be empty.')
+        if len(value) < 2:
+            raise serializers.ValidationError(
+                'Category name must be at least 2 characters.'
+            )
+        return value

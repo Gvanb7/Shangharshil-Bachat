@@ -201,3 +201,47 @@ def _unpaid_interest(loan):
     """Helper — returns unpaid interest portion of remaining balance."""
     monthly_rate = loan.interest_rate / Decimal('100') / Decimal('12')
     return round2(loan.amount_remaining * monthly_rate / (1 + monthly_rate))
+
+def generate_loan_schedule(loan):
+    """
+    Generates full month-by-month repayment schedule
+    using reducing balance method.
+    """
+    from dateutil.relativedelta import relativedelta
+    from datetime import date
+
+    if not loan.disbursed_on:
+        return []
+
+    schedule    = []
+    balance     = Decimal(str(loan.principal))
+    monthly_rate = Decimal(str(loan.interest_rate)) / Decimal('100') / Decimal('12')
+    emi          = Decimal(str(loan.monthly_installment))
+
+    for month in range(1, loan.term_months + 1):
+        interest_portion  = round2(balance * monthly_rate)
+        principal_portion = round2(emi - interest_portion)
+
+        # last month — clear remaining balance
+        if month == loan.term_months:
+            principal_portion = balance
+            emi_this_month    = round2(balance + interest_portion)
+        else:
+            emi_this_month = emi
+
+        balance -= principal_portion
+        if balance < Decimal('0.00'):
+            balance = Decimal('0.00')
+
+        due_date = loan.disbursed_on + relativedelta(months=month)
+
+        schedule.append({
+            'month':              month,
+            'due_date':           due_date,
+            'emi':                emi_this_month,
+            'principal_portion':  principal_portion,
+            'interest_portion':   interest_portion,
+            'balance_after':      balance,
+        })
+
+    return schedule

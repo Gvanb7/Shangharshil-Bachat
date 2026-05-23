@@ -6,15 +6,17 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 
 from accounts.permissions import IsAdmin, IsMember
-from .models import SavingsAccount, SavingsTransaction, Loan, LoanRepayment, Expenditure
+from .models import SavingsAccount, SavingsTransaction, Loan, LoanRepayment, Expenditure, ExpenditureCategory
 from .serializers import (
     SavingsAccountSerializer, SavingsTransactionSerializer, 
     DepositWithdrawSerializer, LoanSerializer, LoanRepaymentSerializer,
     RepaymentInputSerializer, ExpenditureSerializer,
+    ExpenditureCategorySerializer,
 )
 
 from .services import (
-    deposit_to_savings, withdraw_from_savings, apply_interest_to_account, disburse_loan, record_loan_repayment, 
+    deposit_to_savings, withdraw_from_savings, apply_interest_to_account, disburse_loan, record_loan_repayment,
+    generate_loan_schedule, 
 )
 
 User = get_user_model()
@@ -297,6 +299,47 @@ class MemberLoanView(APIView):
         ).select_related('member', 'approved_by')
         return Response(LoanSerializer(loans, many=True).data)
 
+class AdminLoanScheduleView(APIView):
+    """Returns full repayment schedule with paid/unpaid status per month."""
+    permission_classes = [IsAdmin]
+
+    def get(self, request, loan_id):
+        loan     = get_object_or_404(Loan, id=loan_id)
+        schedule = generate_loan_schedule(loan)
+
+        if not schedule:
+            return Response([])
+
+        # get all repayments for this loan
+        repayments = LoanRepayment.objects.filter(loan=loan).order_by('paid_at')
+
+        # match repayments to months
+        result         = []
+        repayment_list = list(repayments)
+        paid_count     = 0
+
+        for item in schedule:
+            if paid_count < len(repayment_list):
+                repayment  = repayment_list[paid_count]
+                is_paid    = True
+                paid_count += 1
+            else:
+                repayment = None
+                is_paid   = False
+
+            result.append({
+                'month':             item['month'],
+                'due_date':          item['due_date'].strftime('%Y-%m-%d'),
+                'emi':               str(item['emi']),
+                'principal_portion': str(item['principal_portion']),
+                'interest_portion':  str(item['interest_portion']),
+                'balance_after':     str(item['balance_after']),
+                'is_paid':           is_paid,
+                'paid_at':           repayment.paid_at.strftime('%Y-%m-%d') if repayment else None,
+                'amount_paid':       str(repayment.amount_paid) if repayment else None,
+            })
+
+        return Response(result)
 
 #--------Expenditure-----
 
@@ -316,25 +359,45 @@ class AdminExpenditureView(APIView):
             return Response(serializer.data, status=201)
         return Response(serializer.errors, status=400)
 
-
-class AdminExpenditureDetailView(APIView):
-    """Admin edits or deletes a specific expenditure."""
+class AdminCategoryListCreateView(APIView):
+    """Admin lists all categories and creates new ones."""
     permission_classes = [IsAdmin]
 
-    def get(self, request, expenditure_id):
-        exp = get_object_or_404(Expenditure, id=expenditure_id)
-        return Response(ExpenditureSerializer(exp).data)
+    def get(self, request):
+        categories = ExpenditureCategory.objects.filter(is_active=True)
+        return Response(
+            ExpenditureCategorySerializer(categories, many=True).data
+        )
 
-    @transaction.atomic
-    def patch(self, request, expenditure_id):
-        exp        = get_object_or_404(Expenditure, id=expenditure_id)
-        serializer = ExpenditureSerializer(exp, data=request.data, partial=True)
+    def post(self, request):
+        serializer = ExpenditureCategorySerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(created_by=request.user)
+            return Response(serializer.data, status=201)
+        return Response(serializer.errors, status=400)
+
+class AdminCategoryDetailView(APIView):
+    """Admin edits or deactivates a category."""
+    permission_classes = [IsAdmin]
+
+    def patch(self, request, category_id):
+        category   = get_object_or_404(ExpenditureCategory, id=category_id)
+        serializer = ExpenditureCategorySerializer(
+            category, data=request.data, partial=True
+        )
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=400)
 
-    def delete(self, request, expenditure_id):
-        exp = get_object_or_404(Expenditure, id=expenditure_id)
-        exp.delete()
-        return Response({'message': 'Expenditure deleted.'}, status=204)
+    def delete(self, request, category_id):
+        category = get_object_or_404(ExpenditureCategory, id=category_id)
+        if category.expenditures.count() > 0:
+            # soft delete — don't delete if has expenditures
+            category.is_active = False
+            category.save()
+            return Response(
+                {'message': 'Category deactivated (has existing expenditures).'}
+            )
+        category.delete()
+        return Response({'message': 'Category deleted.'}, status=204)

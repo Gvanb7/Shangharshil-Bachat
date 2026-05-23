@@ -217,7 +217,7 @@ export default function AdminMembers() {
         {/* Table */}
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   {['Name', 'Email', 'Phone', 'Joined', 'Status', 'Actions'].map(h => (
