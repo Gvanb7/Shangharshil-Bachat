@@ -6,12 +6,15 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 
 from accounts.permissions import IsAdmin, IsMember
-from .models import SavingsAccount, SavingsTransaction, Loan, LoanRepayment, Expenditure, ExpenditureCategory
+from .models import (
+    SavingsAccount, SavingsTransaction, Loan, LoanRepayment, 
+    Expenditure, ExpenditureCategory, Income, IncomeCategory,
+)
 from .serializers import (
     SavingsAccountSerializer, SavingsTransactionSerializer, 
     DepositWithdrawSerializer, LoanSerializer, LoanRepaymentSerializer,
     RepaymentInputSerializer, ExpenditureSerializer,
-    ExpenditureCategorySerializer,
+    ExpenditureCategorySerializer, IncomeSerializer, IncomeCategorySerializer,
 )
 
 from .services import (
@@ -401,3 +404,84 @@ class AdminCategoryDetailView(APIView):
             )
         category.delete()
         return Response({'message': 'Category deleted.'}, status=204)
+    
+class AdminIncomeCategoryListCreateView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        categories = IncomeCategory.objects.filter(is_active=True)
+        return Response(
+            IncomeCategorySerializer(categories, many=True).data
+        )
+
+    def post(self, request):
+        serializer = IncomeCategorySerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(created_by=request.user)
+            return Response(serializer.data, status=201)
+        return Response(serializer.errors, status=400)
+
+
+class AdminIncomeCategoryDetailView(APIView):
+    permission_classes = [IsAdmin]
+
+    def patch(self, request, category_id):
+        category   = get_object_or_404(IncomeCategory, id=category_id)
+        serializer = IncomeCategorySerializer(
+            category, data=request.data, partial=True
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=400)
+
+    def delete(self, request, category_id):
+        category = get_object_or_404(IncomeCategory, id=category_id)
+        if category.incomes.count() > 0:
+            category.is_active = False
+            category.save()
+            return Response(
+                {'message': 'Category deactivated (has existing income records).'}
+            )
+        category.delete()
+        return Response({'message': 'Category deleted.'}, status=204)
+
+
+class AdminIncomeView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        incomes = Income.objects.select_related(
+            'category', 'recorded_by'
+        ).all()
+        return Response(IncomeSerializer(incomes, many=True).data)
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = IncomeSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(recorded_by=request.user)
+            return Response(serializer.data, status=201)
+        return Response(serializer.errors, status=400)
+
+
+class AdminIncomeDetailView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request, income_id):
+        income = get_object_or_404(Income, id=income_id)
+        return Response(IncomeSerializer(income).data)
+
+    @transaction.atomic
+    def patch(self, request, income_id):
+        income     = get_object_or_404(Income, id=income_id)
+        serializer = IncomeSerializer(income, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=400)
+
+    def delete(self, request, income_id):
+        income = get_object_or_404(Income, id=income_id)
+        income.delete()
+        return Response({'message': 'Income record deleted.'}, status=204)

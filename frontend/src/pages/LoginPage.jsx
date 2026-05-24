@@ -45,21 +45,39 @@ export default function LoginPage() {
       </div>
 
       <div className="w-full max-w-md relative z-10">
+        <div className="flex flex-col items-center text-center mb-8">
 
-        {/* Logo */}
-        <div className="text-center mb-8 animate-fade-in-down">
-          <div className="inline-flex items-center justify-center w-20 h-20
-                          bg-white rounded-3xl shadow-2xl mb-5 transform hover:scale-110
-                          hover:rotate-3 transition-all duration-300 cursor-pointer">
-            <span className="text-4xl">🏦</span>
-          </div>
-          <h1 className="text-3xl font-bold text-white tracking-tight mb-2">
-            Shangharshil Bachat Samuha
-          </h1>
-          <p className="text-primary-100 text-sm font-medium">
-            Member Management System
-          </p>
+  {/* Logo */}
+      <div className="flex justify-center mb-5">
+        <div
+          className="w-40 h-40 md:w-44 md:h-44 bg-white 
+                 rounded-xl shadow-2xl overflow-hidden 
+                 flex items-center justify-center p-2"
+        >
+          <img
+            src="/Bachat.jpeg"
+            alt="Bachat Samuha Logo"
+            className="w-full h-full object-contain "
+          />
         </div>
+      </div>
+
+      {/* Title */}
+      <h1
+        className="text-3xl md:text-4xl font-extrabold text-white
+               tracking-tight drop-shadow-lg leading-tight"
+      >
+        Shangharshil Bachat Samuha
+      </h1>
+
+      {/* Subtitle */}
+      <p
+        className="text-gray-200 text-lg md:text-xl font-medium
+               mt-3 tracking-wide"
+      >
+        Member Management System
+      </p>
+    </div>
 
         {/* Card */}
         <div className="card shadow-2xl border border-white/20 backdrop-blur-sm animate-fade-in-up">
@@ -86,8 +104,7 @@ export default function LoginPage() {
             <form onSubmit={handleLogin} className="space-y-5">
               {/* Email Field */}
               <div className="group">
-                <label className="block text-sm font-semibold text-gray-700 mb-2 
-                                  flex items-center gap-2">
+                <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2">
                   <svg className="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
                           d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207" />
@@ -119,7 +136,7 @@ export default function LoginPage() {
 
               {/* Password Field */}
               <div className="group">
-                <label className="block text-sm font-semibold text-gray-700 mb-2 
+                <label className="text-sm font-semibold text-gray-700 mb-2 
                                   flex items-center gap-2">
                   <svg className="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
@@ -220,7 +237,7 @@ export default function LoginPage() {
         {/* Footer */}
         <div className="text-center mt-6 space-y-2">
           <p className="text-primary-100 text-xs font-medium">
-            © {new Date().getFullYear()} Shangharshil Yuva Bachat Samuha
+            © {new Date().getFullYear()} Shangharshil Bachat Samuha
           </p>
           <p className="text-primary-200/60 text-[12px]">
             • All rights reserved 

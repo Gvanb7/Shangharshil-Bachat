@@ -13,17 +13,19 @@ export default function AdminDashboard() {
   useEffect(() => {
     async function loadStats() {
       try {
-        const [membersRes, savingsRes, loansRes, expendRes] = await Promise.all([
+        const [membersRes, savingsRes, loansRes, expendRes, incomeRes] = await Promise.all([
           api.get('/admin/members/'),
           api.get('/savings/'),
           api.get('/loans/'),
           api.get('/expenditures/'),
+          api.get('/income/'),
         ])
 
         const members      = membersRes.data
         const savings      = savingsRes.data
         const loans        = loansRes.data
         const expenditures = expendRes.data
+        const incomes      = incomeRes.data
 
         const totalSavings = savings.reduce(
           (sum, a) => sum + parseFloat(a.balance || 0), 0
@@ -35,6 +37,9 @@ export default function AdminDashboard() {
         const totalExpend = expenditures.reduce(
           (sum, e) => sum + parseFloat(e.amount || 0), 0
         )
+        const totalIncome = incomes.reduce(
+          (sum, i) => sum + parseFloat(i.amount || 0), 0
+        )
         const pendingLoans = loans.filter(l => l.status === 'pending').length
 
         setStats({
@@ -45,6 +50,7 @@ export default function AdminDashboard() {
           activeLoans:   activeLoans.length,
           pendingLoans,
           totalExpend,
+          totalIncome,
           recentMembers: members.slice(0, 5),
           recentLoans:   loans.slice(0, 5),
         })
@@ -92,7 +98,7 @@ export default function AdminDashboard() {
       <div className="space-y-6">
 
         {/* Stat cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
           <StatCard
             label="Total members"
             value={stats.totalMembers}
@@ -110,6 +116,12 @@ export default function AdminDashboard() {
             value={stats.activeLoans}
             sub={fmt(stats.totalLoaned) + ' disbursed'}
             color="yellow"
+          />
+          <StatCard
+            label="Total income"
+            value={fmt(stats.totalIncome)}
+            sub="all time"
+            color="green"
           />
           <StatCard
             label="Total expenditure"

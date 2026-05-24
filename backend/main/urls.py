@@ -37,4 +37,15 @@ urlpatterns = [
          views.AdminCategoryListCreateView.as_view()),
     path('expenditures/categories/<uuid:category_id>/',
          views.AdminCategoryDetailView.as_view()),
+    
+    # --------- Income -----------------
+    path('income/categories/',
+        views.AdminIncomeCategoryListCreateView.as_view()),
+    path('income/categories/<uuid:category_id>/',
+         views.AdminIncomeCategoryDetailView.as_view()),
+    
+    path('income/',
+        views.AdminIncomeView.as_view()),
+    path('income/<uuid:income_id>/',
+        views.AdminIncomeDetailView.as_view()),
 ]

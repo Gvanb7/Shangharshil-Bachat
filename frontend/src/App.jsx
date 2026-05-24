@@ -9,6 +9,7 @@ import AdminSavings     from './pages/admin/AdminSavings'
 import AdminLoans       from './pages/admin/AdminLoans'
 import AdminExpenditure from './pages/admin/AdminExpenditure'
 import MemberDashboard  from './pages/member/MemberDashboard'
+import AdminIncome      from './pages/admin/AdminIncome'
 
 function RootRedirect() {
   const { isAuth, user } = useAuthStore()
@@ -41,6 +42,9 @@ export default function App() {
         } />
         <Route path="/admin/expenditure" element={
           <AdminRoute><AdminExpenditure /></AdminRoute>
+        } />
+        <Route path="/admin/income" element={
+          <AdminRoute><AdminIncome /></AdminRoute>
         } />
 
         {/* Member routes */}

@@ -206,3 +206,49 @@ class Expenditure(models.Model):
 
     def __str__(self):
         return f'{self.category} Rs.{self.amount} — {self.expense_date}'
+    
+class IncomeCategory(models.Model):
+    id         = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name       = models.CharField(max_length=100, unique=True)
+    created_by = models.ForeignKey(
+                     settings.AUTH_USER_MODEL,
+                     on_delete=models.SET_NULL,
+                     null=True,
+                     related_name='created_income_categories'
+                 )
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_active  = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class Income(models.Model):
+    id           = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    category     = models.ForeignKey(
+                       IncomeCategory,
+                       on_delete=models.PROTECT,
+                       related_name='incomes'
+                   )
+    amount       = models.DecimalField(
+                       max_digits=12, decimal_places=2,
+                       validators=[MinValueValidator(Decimal('0.01'))]
+                   )
+    description  = models.TextField()
+    income_date  = models.DateField()
+    recorded_by  = models.ForeignKey(
+                       settings.AUTH_USER_MODEL,
+                       on_delete=models.PROTECT,
+                       related_name='recorded_incomes'
+                   )
+    created_at   = models.DateTimeField(auto_now_add=True)
+    updated_at   = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-income_date']
+
+    def __str__(self):
+        return f'{self.category.name} Rs.{self.amount} — {self.income_date}'

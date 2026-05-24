@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { path: '/admin/savings',     label: 'Savings',     icon: '💰' },
   { path: '/admin/loans',       label: 'Loans',       icon: '📋' },
   { path: '/admin/expenditure', label: 'Expenditure', icon: '📊' },
+  { path: '/admin/income',      label:  'Income',     icon: '📈' },
 ]
 
 export default function AdminLayout({ children }) {
@@ -36,7 +37,7 @@ export default function AdminLayout({ children }) {
 
       {/* Sidebar */}
       <aside className={`
-        fixed inset-y-0 left-0 z-30 w-56 bg-primary-900
+        fixed inset-y-0 left-0 z-30 w-56 bg-primary-500
         flex flex-col transform transition-transform duration-300
         lg:relative lg:translate-x-0 lg:flex-shrink-0
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
@@ -46,7 +47,7 @@ export default function AdminLayout({ children }) {
         <div className="p-4 border-b border-primary-700 flex items-center
                         justify-between">
           <div className="flex items-center gap-3">
-            <span className="text-2xl flex-shrink-0">🏦</span>
+            <span className="text-2xl flex-shrink-0"></span>
             <div>
               <p className="text-white font-semibold text-sm leading-tight">
                 Shangharshil
