@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -197,7 +199,11 @@ class AdminCreateLoanView(APIView):
         try:
             serializer = LoanSerializer(data=request.data)
             if serializer.is_valid():
-                loan = serializer.save(status='pending')
+                # admin-created loans skip pending — go straight to approved
+                loan = serializer.save(
+                    status='approved',
+                    approved_by=request.user,
+                )
                 return Response(LoanSerializer(loan).data, status=201)
             return Response(serializer.errors, status=400)
         except Exception as e:
@@ -215,12 +221,25 @@ class AdminListLoansView(APIView):
         return Response(LoanSerializer(loans, many=True).data)
     
 class AdminLoanDetailView(APIView):
-    """Admin views a specific loan."""
     permission_classes = [IsAdmin]
 
     def get(self, request, loan_id):
         loan = get_object_or_404(Loan, id=loan_id)
         return Response(LoanSerializer(loan).data)
+
+    def patch(self, request, loan_id):
+        loan = get_object_or_404(Loan, id=loan_id)
+        # only allow editing pending loans
+        if loan.status not in ['pending', 'approved']:
+            return Response(
+                {'error': 'Cannot edit an active or closed loan.'},
+                status=400
+            )
+        serializer = LoanSerializer(loan, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(LoanSerializer(loan).data)
+        return Response(serializer.errors, status=400)
     
 class AdminApproveLoanView(APIView):
     """Admin approves a pending loan."""
@@ -485,3 +504,67 @@ class AdminIncomeDetailView(APIView):
         income = get_object_or_404(Income, id=income_id)
         income.delete()
         return Response({'message': 'Income record deleted.'}, status=204)
+    
+class MemberApplyLoanView(APIView):
+    """Member applies for a loan — only principal and purpose."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        principal = request.data.get('principal', '').strip()
+        purpose   = request.data.get('purpose', '').strip()
+
+        if not principal:
+            return Response({'error': 'Principal amount is required.'}, status=400)
+
+        try:
+            principal = Decimal(str(principal))
+            if principal <= Decimal('0.00'):
+                raise ValueError
+        except (ValueError, Exception):
+            return Response({'error': 'Enter a valid principal amount.'}, status=400)
+
+        if not purpose:
+            return Response({'error': 'Purpose is required.'}, status=400)
+
+        # check if member already has a pending loan application
+        existing_pending = Loan.objects.filter(
+            member=request.user,
+            status='pending'
+        ).exists()
+
+        if existing_pending:
+            return Response(
+                {'error': 'You already have a pending loan application.'},
+                status=400
+            )
+
+        loan = Loan.objects.create(
+            member=request.user,
+            principal=principal,
+            purpose=purpose,
+            status='pending',
+            interest_rate=Decimal('12.00'),  # default — admin can change on approval
+            term_months=12,                  # default — admin sets on disburse
+        )
+
+        return Response({
+            'message': 'Loan application submitted successfully.',
+            'loan': LoanSerializer(loan).data,
+        }, status=201)
+
+    def delete(self, request, loan_id):
+        """Member cancels their own pending loan application."""
+        try:
+            loan = Loan.objects.get(
+                id=loan_id,
+                member=request.user,
+                status='pending'
+            )
+        except Loan.DoesNotExist:
+            return Response(
+                {'error': 'No pending loan application found.'},
+                status=404
+            )
+
+        loan.delete()
+        return Response({'message': 'Loan application cancelled.'})

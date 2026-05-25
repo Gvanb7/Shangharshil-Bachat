@@ -29,6 +29,14 @@ export default function AdminLoans() {
   const [formLoad,   setFormLoad]   = useState(false)
   const [emiPreview, setEmiPreview] = useState(null)
 
+  const [showApproveModal, setShowApproveModal] = useState(false)
+  const [approveTarget,    setApproveTarget]    = useState(null)
+  const [approveForm,      setApproveForm]      = useState({
+    interest_rate: '12.00', term_months: '12'
+  })
+  const [approveErr,  setApproveErr]  = useState('')
+  const [approveLoad, setApproveLoad] = useState(false)
+
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
@@ -122,19 +130,36 @@ export default function AdminLoans() {
   }
 
   async function handleApprove(loan) {
-    if (!window.confirm(
-      `Approve loan of Rs. ${loan.principal} for ${loan.member_name}?`
-    )) return
+    setApproveTarget(loan)
+    setApproveForm({ interest_rate: '12.00', term_months: '12' })
+    setApproveErr('')
+    setShowApproveModal(true)
+  }
+
+  async function submitApprove(e) {
+    e.preventDefault()
+    setApproveErr('')
+    setApproveLoad(true)
     try {
-      await api.post(`/loans/${loan.id}/approve/`)
+      // first update the loan terms
+      await api.patch(`/loans/${approveTarget.id}/`, {
+        interest_rate: approveForm.interest_rate,
+        term_months:   parseInt(approveForm.term_months),
+      })
+      // then approve
+      await api.post(`/loans/${approveTarget.id}/approve/`)
       flash('Loan approved.')
+      setShowApproveModal(false)
+      setApproveTarget(null)
       fetchAll()
-      if (selected?.id === loan.id) {
-        const res = await api.get(`/loans/${loan.id}/`)
+      if (selected?.id === approveTarget.id) {
+        const res = await api.get(`/loans/${approveTarget.id}/`)
         setSelected(res.data)
       }
-    } catch {
-      setError('Failed to approve loan.')
+    } catch (err) {
+      setApproveErr(err.response?.data?.error || 'Failed to approve loan.')
+    } finally {
+      setApproveLoad(false)
     }
   }
 
@@ -567,6 +592,72 @@ export default function AdminLoans() {
               onCancel={closeAll}
               loading={formLoad}
               label="Record repayment"
+            />
+          </form>
+        </Modal>
+      )}
+
+      {/* Approve loan modal */}
+      {showApproveModal && approveTarget && (
+        <Modal
+          title={`Approve loan — ${approveTarget.member_name}`}
+          onClose={() => setShowApproveModal(false)}>
+          <form onSubmit={submitApprove} className="space-y-4">
+            {approveErr && <ErrorBox msg={approveErr} />}
+
+            <div className="bg-gray-50 rounded-lg px-4 py-3">
+              <p className="text-xs text-gray-500">Principal requested</p>
+              <p className="text-sm font-semibold text-gray-800">
+                {fmt(approveTarget.principal)}
+              </p>
+              {approveTarget.purpose && (
+                <>
+                  <p className="text-xs text-gray-500 mt-2">Purpose</p>
+                  <p className="text-sm text-gray-700">{approveTarget.purpose}</p>
+                </>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Interest rate (%) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="input-field"
+                  value={approveForm.interest_rate}
+                  onChange={(e) => setApproveForm({
+                    ...approveForm, interest_rate: e.target.value
+                  })}
+                  required
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Term (months) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="360"
+                  className="input-field"
+                  value={approveForm.term_months}
+                  onChange={(e) => setApproveForm({
+                    ...approveForm, term_months: e.target.value
+                  })}
+                  required
+                />
+              </div>
+            </div>
+
+            <ModalButtons
+              onCancel={() => setShowApproveModal(false)}
+              loading={approveLoad}
+              label="Approve loan"
             />
           </form>
         </Modal>
