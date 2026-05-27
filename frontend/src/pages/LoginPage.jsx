@@ -67,7 +67,7 @@ export default function LoginPage() {
         className="text-3xl md:text-4xl font-extrabold text-white
                tracking-tight drop-shadow-lg leading-tight"
       >
-        Shangharshil Bachat Samuha
+        Shree Shangharshil Bachat Samuha
       </h1>
 
       {/* Subtitle */}

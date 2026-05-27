@@ -21,7 +21,9 @@ export default function MemberLayout({ children, title }) {
       <header className="bg-primary-900 text-white px-6 py-4
                          flex items-center justify-between sticky top-0 z-10">
         <div className="flex items-center gap-3">
-          <span className="text-2xl">🏦</span>
+          <img src="/Bachat.jpeg" alt="logo" 
+          className='w-16 h-16 object-contain' 
+          />
           <div>
             <p className="font-semibold text-sm leading-tight">
               Shangharshil Bachat Samuha

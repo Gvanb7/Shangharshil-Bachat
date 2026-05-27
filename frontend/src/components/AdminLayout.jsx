@@ -47,7 +47,8 @@ export default function AdminLayout({ children }) {
         <div className="p-4 border-b border-primary-700 flex items-center
                         justify-between">
           <div className="flex items-center gap-3">
-            <span className="text-2xl flex-shrink-0"></span>
+            <img src="/Bachat.jpeg" alt="logo"
+            className='w-16 h-16 object-contain' />
             <div>
               <p className="text-white font-semibold text-sm leading-tight">
                 Shangharshil
