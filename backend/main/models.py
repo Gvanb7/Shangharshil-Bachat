@@ -252,3 +252,19 @@ class Income(models.Model):
 
     def __str__(self):
         return f'{self.category.name} Rs.{self.amount} — {self.income_date}'
+    
+class MemberDocument(models.Model):
+    id                 = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    member             = models.OneToOneField(
+                             settings.AUTH_USER_MODEL,
+                             on_delete=models.CASCADE,
+                             related_name='document'
+                         )
+    citizenship_front  = models.ImageField(upload_to='documents/citizenship/')
+    citizenship_back   = models.ImageField(upload_to='documents/citizenship/')
+    signature          = models.ImageField(upload_to='documents/signatures/')
+    uploaded_at        = models.DateTimeField(auto_now_add=True)
+    updated_at         = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'Documents — {self.member.full_name or self.member.email}'

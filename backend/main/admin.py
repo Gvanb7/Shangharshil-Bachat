@@ -1,5 +1,9 @@
 from django.contrib import admin
-from .models import SavingsAccount, SavingsTransaction, Loan, LoanRepayment, Expenditure
+from .models import (
+        SavingsAccount, SavingsTransaction, Loan, LoanRepayment, Expenditure,
+        ExpenditureCategory, Income, IncomeCategory, MemberDocument
+)
+
 
 
 @admin.register(SavingsAccount)
@@ -34,3 +38,8 @@ class ExpenditureAdmin(admin.ModelAdmin):
     list_display  = ['category', 'amount', 'expense_date', 'recorded_by']
     list_filter   = ['category']
     search_fields = ['description']
+    
+@admin.register(MemberDocument)
+class MemberDocumentAdmin(admin.ModelAdmin):
+    list_display  = ['member', 'uploaded_at']
+    search_fields = ['member__full_name', 'member__email']

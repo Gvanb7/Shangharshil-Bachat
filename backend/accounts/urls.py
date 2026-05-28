@@ -15,4 +15,5 @@ urlpatterns = [
     path('admin/members/register/',  views.AdminRegisterMemberView.as_view()),
     path('admin/members/<uuid:user_id>/', views.AdminEditMemberView.as_view()),
     path('admin/members/<uuid:user_id>/reset-password/', views.AdminChangePasswordView.as_view()),
+    path('admin/members/<uuid:user_id>/documents/', views.AdminMemberDocumentView.as_view()),
 ]

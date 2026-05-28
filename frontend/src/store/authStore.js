@@ -1,38 +1,61 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
 
-const useAuthStore = create(
-  persist(
-    (set) => ({
-      user:         null,
-      accessToken:  null,
-      refreshToken: null,
-      isAuth:       false,
-
-      setAuth: (user, accessToken, refreshToken) => {
-        localStorage.setItem('access_token',  accessToken)
-        localStorage.setItem('refresh_token', refreshToken)
-        set({ user, accessToken, refreshToken, isAuth: true })
-      },
-
-      updateUser: (user) => set({ user }),
-
-      logout: () => {
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
-        set({ user: null, accessToken: null, refreshToken: null, isAuth: false })
-      },
-    }),
-    {
-      name:    'auth-storage',
-      partialize: (state) => ({
-        user:         state.user,
-        accessToken:  state.accessToken,
-        refreshToken: state.refreshToken,
-        isAuth:       state.isAuth,
-      }),
+// rehydrate immediately when module loads
+function getInitialState() {
+  try {
+    const stored = sessionStorage.getItem('auth')
+    if (stored) {
+      const parsed = JSON.parse(stored)
+      if (parsed?.accessToken) {
+        sessionStorage.setItem('access_token',  parsed.accessToken)
+        sessionStorage.setItem('refresh_token', parsed.refreshToken || '')
+        return {
+          user:         parsed.user         || null,
+          accessToken:  parsed.accessToken,
+          refreshToken: parsed.refreshToken || null,
+          isAuth:       true,
+        }
+      }
     }
-  )
-)
+  } catch {
+    // ignore
+  }
+  return {
+    user:         null,
+    accessToken:  null,
+    refreshToken: null,
+    isAuth:       false,
+  }
+}
+
+const useAuthStore = create((set, get) => ({
+  ...getInitialState(),
+
+  setAuth: (user, accessToken, refreshToken) => {
+    sessionStorage.setItem('access_token',  accessToken)
+    sessionStorage.setItem('refresh_token', refreshToken)
+    sessionStorage.setItem('auth', JSON.stringify({
+      user, accessToken, refreshToken
+    }))
+    set({ user, accessToken, refreshToken, isAuth: true })
+  },
+
+  updateUser: (user) => {
+    const state = get()
+    sessionStorage.setItem('auth', JSON.stringify({
+      user,
+      accessToken:  state.accessToken,
+      refreshToken: state.refreshToken,
+    }))
+    set({ user })
+  },
+
+  logout: () => {
+    sessionStorage.removeItem('access_token')
+    sessionStorage.removeItem('refresh_token')
+    sessionStorage.removeItem('auth')
+    set({ user: null, accessToken: null, refreshToken: null, isAuth: false })
+  },
+}))
 
 export default useAuthStore

@@ -10,13 +10,13 @@ from django.db import transaction
 from accounts.permissions import IsAdmin, IsMember
 from .models import (
     SavingsAccount, SavingsTransaction, Loan, LoanRepayment, 
-    Expenditure, ExpenditureCategory, Income, IncomeCategory,
+    Expenditure, ExpenditureCategory, Income, IncomeCategory
 )
 from .serializers import (
     SavingsAccountSerializer, SavingsTransactionSerializer, 
     DepositWithdrawSerializer, LoanSerializer, LoanRepaymentSerializer,
     RepaymentInputSerializer, ExpenditureSerializer,
-    ExpenditureCategorySerializer, IncomeSerializer, IncomeCategorySerializer,
+    ExpenditureCategorySerializer, IncomeSerializer, IncomeCategorySerializer
 )
 
 from .services import (
@@ -568,3 +568,4 @@ class MemberApplyLoanView(APIView):
 
         loan.delete()
         return Response({'message': 'Loan application cancelled.'})
+    

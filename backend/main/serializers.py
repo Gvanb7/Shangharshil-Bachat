@@ -1,6 +1,9 @@
 from rest_framework import serializers
 from decimal import Decimal
-from .models import SavingsAccount, SavingsTransaction, Loan, LoanRepayment, Expenditure, ExpenditureCategory, Income, IncomeCategory
+from .models import(
+    SavingsAccount, SavingsTransaction, Loan, LoanRepayment, Expenditure,
+    ExpenditureCategory, Income, IncomeCategory, MemberDocument
+)
 from .services import calculate_loan_summary
 
 class SavingsAccountSerializer(serializers.ModelSerializer):
@@ -157,3 +160,37 @@ class IncomeSerializer(serializers.ModelSerializer):
             'income_date', 'recorded_by', 'recorded_by_name', 'created_at',
         ]
         read_only_fields = ['id', 'recorded_by', 'created_at']
+        
+class MemberDocumentSerializer(serializers.ModelSerializer):
+    citizenship_front_url = serializers.SerializerMethodField()
+    citizenship_back_url  = serializers.SerializerMethodField()
+    signature_url         = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = MemberDocument
+        fields = [
+            'id', 'member',
+            'citizenship_front', 'citizenship_front_url',
+            'citizenship_back',  'citizenship_back_url',
+            'signature',         'signature_url',
+            'uploaded_at',
+        ]
+        read_only_fields = ['id', 'uploaded_at']
+
+    def _build_url(self, obj, field_name):
+        request = self.context.get('request')
+        field   = getattr(obj, field_name)
+        if field and request:
+            return request.build_absolute_uri(field.url)
+        elif field:
+            return field.url
+        return None
+
+    def get_citizenship_front_url(self, obj):
+        return self._build_url(obj, 'citizenship_front')
+
+    def get_citizenship_back_url(self, obj):
+        return self._build_url(obj, 'citizenship_back')
+
+    def get_signature_url(self, obj):
+        return self._build_url(obj, 'signature')

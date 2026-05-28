@@ -6,6 +6,10 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from rest_framework.parsers import MultiPartParser, FormParser
+from main.models import MemberDocument
+from main.serializers import MemberDocumentSerializer
+
 from .utils import create_and_send_otp, verify_otp
 from .serializers import UserProfileSerializer, AdminUserSerializer, MemberUpdateProfileSerializer
 from .permissions import IsAdmin
@@ -113,39 +117,163 @@ class MeView(APIView):
 
 
 class AdminRegisterMemberView(APIView):
-    """Admin pre-registers a member email so they can sign up."""
     permission_classes = [IsAdmin]
+    parser_classes     = [MultiPartParser, FormParser]
 
     def post(self, request):
-        email = request.data.get('email', '').strip().lower()
-        password = request.data.get('password', '').strip()
+        email     = request.data.get('email', '').strip().lower()
+        password  = request.data.get('password', '').strip()
         full_name = request.data.get('full_name', '').strip()
-        phone = request.data.get('phone', '').strip()
-        address = request.data.get('address', '').strip()
-        
+        phone     = request.data.get('phone', '').strip()
+        address   = request.data.get('address', '').strip()
+
+        # document files
+        citizenship_front = request.FILES.get('citizenship_front')
+        citizenship_back  = request.FILES.get('citizenship_back')
+        signature         = request.FILES.get('signature')
+
+        # validations
         if not email:
             return Response({'error': 'Email is required.'}, status=400)
         if not password:
             return Response({'error': 'Password is required.'}, status=400)
         if len(password) < 8:
-            return Response({'error': 'Password must be at least 8 characters long.'}, status=400)
-        
-
+            return Response(
+                {'error': 'Password must be at least 8 characters.'},
+                status=400
+            )
         if User.objects.filter(email=email).exists():
-            return Response({'error': 'This email is already registered.'}, status=400)
+            return Response(
+                {'error': 'This email is already registered.'},
+                status=400
+            )
 
-        user = User.objects.create_user(email=email, password=password, full_name=full_name, phone = phone, address = address, role='member', is_active=True)
-        
-        #send welcome email with credentials
-        email_sent, email_msg = send_welcome_email(email, full_name, password)
-        return Response({
-            'message': f'Member {email} registered successfully.',
-            'email_sent': email_sent,
-            'email_note': email_msg if not email_sent else 'Credentials sent to member email',
-            'user': AdminUserSerializer(user).data,
-         }, status=201,
+        # document validations
+        if not citizenship_front:
+            return Response(
+                {'error': 'Citizenship front photo is required.'},
+                status=400
+            )
+        if not citizenship_back:
+            return Response(
+                {'error': 'Citizenship back photo is required.'},
+                status=400
+            )
+        if not signature:
+            return Response(
+                {'error': 'Signature photo is required.'},
+                status=400
+            )
+
+        # validate file types
+        allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+        for label, file in [
+            ('Citizenship front', citizenship_front),
+            ('Citizenship back',  citizenship_back),
+            ('Signature',         signature),
+        ]:
+            if file.content_type not in allowed_types:
+                return Response(
+                    {'error': f'{label}: only JPEG, PNG or WebP allowed.'},
+                    status=400
+                )
+            if file.size > 5 * 1024 * 1024:
+                return Response(
+                    {'error': f'{label}: file size must be less than 5MB.'},
+                    status=400
+                )
+
+        # create user
+        user = User.objects.create_user(
+            email=email,
+            password=password,
+            role='member',
+            full_name=full_name,
+            phone=phone,
+            address=address,
+            is_active=True,
         )
-        
+
+        # save documents
+        MemberDocument.objects.create(
+            member=user,
+            citizenship_front=citizenship_front,
+            citizenship_back=citizenship_back,
+            signature=signature,
+        )
+
+        # send welcome email
+        email_sent, email_msg = send_welcome_email(email, full_name, password)
+
+        return Response({
+            'message':    f'Member {email} registered successfully.',
+            'email_sent': email_sent,
+            'email_note': email_msg if not email_sent else 'Credentials sent to member email.',
+            'user':       AdminUserSerializer(user).data,
+        }, status=201)
+
+class AdminMemberDocumentView(APIView):
+    """Admin views and updates member documents."""
+    permission_classes = [IsAdmin]
+    parser_classes     = [MultiPartParser, FormParser]
+
+    def get(self, request, user_id):
+        user = get_object_or_404(User, id=user_id, role='member')
+        try:
+            doc = user.document
+            return Response(
+                MemberDocumentSerializer(doc, context={'request': request}).data
+            )
+        except MemberDocument.DoesNotExist:
+            return Response({'error': 'No documents uploaded yet.'}, status=404)
+
+    def patch(self, request, user_id):
+        user = get_object_or_404(User, id=user_id, role='member')
+
+        try:
+            doc = user.document
+        except MemberDocument.DoesNotExist:
+            doc = None
+
+        # validate files
+        allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+        for label, key in [
+            ('Citizenship front', 'citizenship_front'),
+            ('Citizenship back',  'citizenship_back'),
+            ('Signature',         'signature'),
+        ]:
+            file = request.FILES.get(key)
+            if file:
+                if file.content_type not in allowed_types:
+                    return Response(
+                        {'error': f'{label}: only JPEG, PNG or WebP allowed.'},
+                        status=400
+                    )
+                if file.size > 5 * 1024 * 1024:
+                    return Response(
+                        {'error': f'{label}: file size must be less than 5MB.'},
+                        status=400
+                    )
+
+        if doc:
+            serializer = MemberDocumentSerializer(
+                doc,
+                data=request.FILES,
+                partial=True,
+                context={'request': request}
+            )
+        else:
+            data          = request.FILES.copy()
+            data['member'] = user.id
+            serializer    = MemberDocumentSerializer(
+                data=data,
+                context={'request': request}
+            )
+
+        if serializer.is_valid():
+            serializer.save(member=user)
+            return Response(serializer.data)
+        return Response(serializer.errors, status=400)
 class MemberLoginView(APIView):
     permission_classes = [AllowAny]
 
