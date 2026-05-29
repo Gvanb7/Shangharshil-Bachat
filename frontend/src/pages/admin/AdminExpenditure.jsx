@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import AdminLayout from '../../components/AdminLayout'
 import api from '../../lib/api'
+import { toBS } from '../../lib/nepaliDate'
 
 const EMPTY_FORM = {
   category: '', amount: '', description: '', expense_date: '',
@@ -370,7 +371,7 @@ export default function AdminExpenditure() {
                   <tr key={item.id}
                     className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                      {new Date(item.expense_date).toLocaleDateString('en-NP')}
+                      {toBS(item.expense_date)}
                     </td>
                     <td className="px-4 py-3">
                       <span className="badge-info">

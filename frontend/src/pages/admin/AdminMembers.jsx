@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import AdminLayout from '../../components/AdminLayout'
 import api from '../../lib/api'
+import { toBS } from '../../lib/nepaliDate'
 
 const EMPTY_FORM = {
   email: '', password: '', full_name: '', phone: '', address: '',
@@ -342,7 +343,7 @@ export default function AdminMembers() {
                       {m.phone || <span className="text-gray-400">—</span>}
                     </td>
                     <td className="px-4 py-3 text-gray-500">
-                      {new Date(m.date_joined).toLocaleDateString('en-NP')}
+                      {toBS(m.date_joined)}
                     </td>
                     <td className="px-4 py-3">
                       <span className={m.is_active

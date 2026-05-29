@@ -71,7 +71,8 @@ class LoanRepaymentSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'loan', 'amount_paid', 'principal_portion',
             'interest_portion', 'balance_after', 'note',
-            'recorded_by', 'recorded_by_name', 'paid_at',
+            'recorded_by', 'recorded_by_name', 'paid_at', 
+            'nepali_date',
         ]
         read_only_fields = [
             'id', 'principal_portion', 'interest_portion',
@@ -81,10 +82,18 @@ class LoanRepaymentSerializer(serializers.ModelSerializer):
 class RepaymentInputSerializer(serializers.Serializer):
     amount = serializers.DecimalField(max_digits=12, decimal_places=2)
     note   = serializers.CharField(required=False, allow_blank=True, default='')
+    paid_at = serializers.DateField()
+    nepali_date = serializers.CharField(max_length=20)
 
     def validate_amount(self, value):
         if value <= Decimal('0.00'):
             raise serializers.ValidationError('Amount must be greater than zero.')
+        return value
+    
+    def validate_nepali_date(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('Date is required.')
         return value
 
 

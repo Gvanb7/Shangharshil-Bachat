@@ -3,6 +3,7 @@ import MemberLayout from '../../components/MemberLayout'
 import useAuthStore from '../../store/authStore'
 import api from '../../lib/api'
 import ProfilePicture from '../../components/ProfilePicture'
+import { toBS, formatBS } from '../../lib/nepaliDate'
 
 export default function MemberDashboard() {
   const { user, updateUser } = useAuthStore()
@@ -260,7 +261,7 @@ async function handleCancelLoan(loanId) {
                           {t.type.replace('_', ' ')}
                         </p>
                         <p className="text-xs text-gray-400">
-                          {new Date(t.created_at).toLocaleDateString('en-NP')}
+                          {toBS(t.created_at)}
                         </p>
                       </div>
 
@@ -790,7 +791,7 @@ function LoanCard({ loan, fmt, onCancel, cancelLoad }) {
 
           {loan.due_date && (
             <p className="text-xs text-gray-400">
-              Due date: <strong>{loan.due_date}</strong>
+              Due date: <strong>{toBS(loan.due_date)}</strong>
             </p>
           )}
         </div>

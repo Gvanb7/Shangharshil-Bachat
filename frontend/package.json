@@ -10,7 +10,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@zener/nepali-datepicker-react": "^1.6.2",
     "axios": "^1.14.0",
+    "nepali-date-converter": "^3.4.0",
+    "nepali-datepicker-reactjs": "^1.1.9",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.14.0",

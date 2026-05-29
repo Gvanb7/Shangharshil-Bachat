@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import AdminLayout from '../../components/AdminLayout'
 import api from '../../lib/api'
+import { toBS } from '../../lib/nepaliDate'
 
 const EMPTY_ACCOUNT_FORM = { member_id: '', interest_rate: '6.00' }
 const EMPTY_TXN_FORM     = { amount: '', note: '' }
@@ -285,7 +286,7 @@ export default function AdminSavings() {
                         {acc.member_name || acc.member_email}
                       </p>
                       <p className="text-xs text-gray-500">
-                        {acc.interest_rate}% p.a. · Opened {acc.opened_on}
+                        {acc.interest_rate}% p.a. · Opened {toBS(acc.opened_on)}
                       </p>
                     </div>
                     <div className="text-right">
@@ -357,7 +358,7 @@ export default function AdminSavings() {
                           </span>
                         </div>
                         <p className="text-xs text-gray-400 mt-0.5">
-                          {new Date(t.created_at).toLocaleDateString('en-NP')}
+                          {toBS(t.created_at)}
                           {t.note && ` · ${t.note}`}
                         </p>
                       </div>

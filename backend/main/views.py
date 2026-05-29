@@ -295,6 +295,8 @@ class AdminRecordRepaymentView(APIView):
                     loan=loan,
                     amount_paid=serializer.validated_data['amount'],
                     recorded_by=request.user,
+                    paid_at = serializer.validated_data['paid_at'],
+                    nepali_date = serializer.validated_data['nepali_date'],
                     note=serializer.validated_data['note'],
                 )
                 return Response(LoanRepaymentSerializer(repayment).data, status=201)
@@ -358,6 +360,7 @@ class AdminLoanScheduleView(APIView):
                 'balance_after':     str(item['balance_after']),
                 'is_paid':           is_paid,
                 'paid_at':           repayment.paid_at.strftime('%Y-%m-%d') if repayment else None,
+                'nepali_date' :      repayment.nepali_date if repayment else None,
                 'amount_paid':       str(repayment.amount_paid) if repayment else None,
             })
 

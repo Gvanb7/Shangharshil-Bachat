@@ -152,7 +152,7 @@ def disburse_loan(loan, disbursed_on=None):
     return loan
 
 
-def record_loan_repayment(loan, amount_paid, recorded_by, note=''):
+def record_loan_repayment(loan, amount_paid, recorded_by, paid_at, nepali_date, note=''):
     """
     Records a loan repayment using reducing balance method.
     Splits payment into interest and principal portions.
@@ -193,6 +193,8 @@ def record_loan_repayment(loan, amount_paid, recorded_by, note=''):
         interest_portion=interest_portion,
         balance_after=loan.amount_remaining,
         note=note,
+        paid_at = paid_at,
+        nepali_date = nepali_date,
         recorded_by=recorded_by,
     )
 

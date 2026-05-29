@@ -153,7 +153,8 @@ class LoanRepayment(models.Model):
                              on_delete=models.PROTECT,
                              related_name='recorded_repayments'
                          )
-    paid_at            = models.DateTimeField(auto_now_add=True)
+    paid_at            = models.DateField()
+    nepali_date        = models.CharField(max_length=20, blank=True)
 
     class Meta:
         ordering = ['-paid_at']

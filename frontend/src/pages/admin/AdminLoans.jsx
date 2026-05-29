@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import AdminLayout from '../../components/AdminLayout'
 import api from '../../lib/api'
+import NepaliDatePicker from '../../components/NepaliDatePicker'
+import { toBS, formatBS } from '../../lib/nepaliDate'
 
 const EMPTY_LOAN_FORM = {
   member: '', principal: '', interest_rate: '12.00',
   term_months: '', purpose: '',
 }
-const EMPTY_REPAY_FORM = { amount: '', note: '' }
 
 export default function AdminLoans() {
   const [loans,        setLoans]        = useState([])
@@ -22,9 +23,7 @@ export default function AdminLoans() {
   const [repayLoad,  setRepayLoad]  = useState(false)
 
   const [showCreate, setShowCreate] = useState(false)
-  const [showRepay,  setShowRepay]  = useState(false)
   const [loanForm,   setLoanForm]   = useState(EMPTY_LOAN_FORM)
-  const [repayForm,  setRepayForm]  = useState(EMPTY_REPAY_FORM)
   const [formErr,    setFormErr]    = useState('')
   const [formLoad,   setFormLoad]   = useState(false)
   const [emiPreview, setEmiPreview] = useState(null)
@@ -79,9 +78,7 @@ export default function AdminLoans() {
 
   function closeAll() {
     setShowCreate(false)
-    setShowRepay(false)
     setLoanForm(EMPTY_LOAN_FORM)
-    setRepayForm(EMPTY_REPAY_FORM)
     setFormErr('')
     setEmiPreview(null)
   }
@@ -194,29 +191,6 @@ export default function AdminLoans() {
       }
     } catch {
       setError('Failed to disburse loan.')
-    }
-  }
-
-  async function handleRepay(e) {
-    e.preventDefault()
-    setFormErr('')
-    if (parseFloat(repayForm.amount) <= 0) {
-      setFormErr('Amount must be greater than zero.')
-      return
-    }
-    setFormLoad(true)
-    try {
-      await api.post(`/loans/${selected.id}/repay/`, repayForm)
-      flash(`Repayment of Rs. ${repayForm.amount} recorded.`)
-      closeAll()
-      fetchAll()
-      fetchRepayments(selected.id)
-      const res = await api.get(`/loans/${selected.id}/`)
-      setSelected(res.data)
-    } catch (err) {
-      setFormErr(err.response?.data?.error || 'Repayment failed.')
-    } finally {
-      setFormLoad(false)
     }
   }
 
@@ -404,7 +378,11 @@ export default function AdminLoans() {
                 selected={selected}
                 repayments={repayments}
                 repayLoad={repayLoad}
-                onRepay={() => { setShowRepay(true); setFormErr('') }}
+                onRepay={() => {
+                  fetchAll()
+                  fetchRepayments(selected.id)
+                  api.get(`/loans/${selected.id}/`).then(res => setSelected(res.data))
+                }}
                 fmt={fmt}
                 STATUS_BADGE={STATUS_BADGE}
               />
@@ -535,68 +513,6 @@ export default function AdminLoans() {
         </Modal>
       )}
 
-      {/* Repayment modal */}
-      {showRepay && selected && (
-        <Modal
-          title={`Record repayment — ${selected.member_name}`}
-          onClose={closeAll}>
-          <form onSubmit={handleRepay} className="space-y-4">
-            {formErr && <ErrorBox msg={formErr} />}
-            <div className="bg-gray-50 rounded-lg px-4 py-3 grid grid-cols-2 gap-3">
-              <div>
-                <p className="text-xs text-gray-500">Monthly EMI</p>
-                <p className="text-sm font-semibold text-gray-800">
-                  {fmt(selected.monthly_installment)}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Remaining balance</p>
-                <p className="text-sm font-semibold text-red-600">
-                  {fmt(selected.amount_remaining)}
-                </p>
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Amount paid (Rs.) <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                min="0.01"
-                className="input-field"
-                placeholder={selected.monthly_installment}
-                value={repayForm.amount}
-                onChange={(e) => setRepayForm({
-                  ...repayForm, amount: e.target.value
-                })}
-                required
-                autoFocus
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Note (optional)
-              </label>
-              <input
-                type="text"
-                className="input-field"
-                placeholder="e.g. April installment"
-                value={repayForm.note}
-                onChange={(e) => setRepayForm({
-                  ...repayForm, note: e.target.value
-                })}
-              />
-            </div>
-            <ModalButtons
-              onCancel={closeAll}
-              loading={formLoad}
-              label="Record repayment"
-            />
-          </form>
-        </Modal>
-      )}
-
       {/* Approve loan modal */}
       {showApproveModal && approveTarget && (
         <Modal
@@ -675,12 +591,14 @@ function LoanDetailPanel({
   const [schedule,     setSchedule]     = useState([])
   const [scheduleLoad, setScheduleLoad] = useState(false)
   const [activeTab,    setActiveTab]    = useState('history')
+  const [payingMonth,  setPayingMonth]  = useState(null)  // which month Pay Now was clicked
 
   useEffect(() => {
     if (selected?.status === 'active' || selected?.status === 'closed') {
       fetchSchedule()
     }
     setActiveTab('history')
+    setPayingMonth(null)
   }, [selected?.id])
 
   async function fetchSchedule() {
@@ -702,12 +620,11 @@ function LoanDetailPanel({
 
   const paidMonths   = schedule.filter(s => s.is_paid).length
   const unpaidMonths = schedule.filter(s => !s.is_paid).length
-
-  const showTabs = selected.status === 'active' || selected.status === 'closed'
+  const showTabs     = selected.status === 'active' || selected.status === 'closed'
 
   return (
     <>
-      {/* Header */}
+      {/* Header — removed Record repayment button from here */}
       <div className="card-header">
         <div className="flex items-center justify-between">
           <div>
@@ -718,27 +635,20 @@ function LoanDetailPanel({
               {selected.status}
             </span>
           </div>
-          {selected.status === 'active' && (
-            <button
-              onClick={onRepay}
-              className="btn-primary text-xs py-1.5">
-              Record repayment
-            </button>
-          )}
         </div>
       </div>
 
       {/* Overview cards */}
       <div className="px-4 py-3 grid grid-cols-2 gap-2 border-b border-gray-100">
         {[
-          ['Principal',     fmt(selected.principal),            'text-gray-800'],
-          ['Interest rate', `${selected.interest_rate}% p.a.`,  'text-gray-800'],
-          ['Term',          `${selected.term_months} months`,   'text-gray-800'],
-          ['Monthly EMI',   fmt(selected.monthly_installment),  'text-blue-700'],
-          ['Total payable', fmt(selected.total_payable),        'text-gray-800'],
-          ['Amount paid',   fmt(selected.amount_paid),          'text-green-700'],
-          ['Remaining',     fmt(selected.amount_remaining),     'text-red-600'],
-          ['Due date',      selected.due_date || '—',           'text-gray-800'],
+          ['Principal',     fmt(selected.principal),           'text-gray-800'],
+          ['Interest rate', `${selected.interest_rate}% p.a.`, 'text-gray-800'],
+          ['Term',          `${selected.term_months} months`,  'text-gray-800'],
+          ['Monthly EMI',   fmt(selected.monthly_installment), 'text-blue-700'],
+          ['Total payable', fmt(selected.total_payable),       'text-gray-800'],
+          ['Amount paid',   fmt(selected.amount_paid),         'text-green-700'],
+          ['Remaining',     fmt(selected.amount_remaining),    'text-red-600'],
+          ['Due date', selected.due_date ? toBS(selected.due_date) : '—', 'text-gray-800'],
         ].map(([label, value, color]) => (
           <div key={label} className="bg-gray-50 rounded-lg px-3 py-2">
             <p className="text-xs text-gray-500">{label}</p>
@@ -795,7 +705,7 @@ function LoanDetailPanel({
       {/* Tab content */}
       <div className="max-h-72 overflow-y-auto">
 
-        {/* Repayment history — default tab + shown for pending/approved/rejected */}
+        {/* Repayment history */}
         {(!showTabs || activeTab === 'history') && (
           <div className="divide-y divide-gray-100">
             {!showTabs && (
@@ -826,7 +736,10 @@ function LoanDetailPanel({
                       Interest: {fmt(r.interest_portion)}
                     </p>
                     <p className="text-xs text-gray-400">
-                      {new Date(r.paid_at).toLocaleDateString('en-NP')}
+                      {r.nepali_date
+                        ? formatBS(r.nepali_date)
+                        : toBS(r.paid_at)
+                      }
                       {r.note && ` · ${r.note}`}
                     </p>
                   </div>
@@ -842,7 +755,7 @@ function LoanDetailPanel({
           </div>
         )}
 
-        {/* Monthly schedule tab */}
+        {/* Monthly schedule */}
         {showTabs && activeTab === 'schedule' && (
           <>
             {scheduleLoad ? (
@@ -885,7 +798,7 @@ function LoanDetailPanel({
                           {s.month}
                         </td>
                         <td className="px-2 py-2 text-gray-600 whitespace-nowrap">
-                          {s.due_date}
+                          {toBS(s.due_date)}
                         </td>
                         <td className="px-2 py-2 font-semibold text-gray-800
                                        whitespace-nowrap">
@@ -904,16 +817,28 @@ function LoanDetailPanel({
                           {s.is_paid ? (
                             <div>
                               <span className="badge-success">✓ Paid</span>
-                              {s.paid_at && (
-                                <p className="text-gray-400 mt-0.5 text-xs">
-                                  {s.paid_at}
-                                </p>
+                              <p className="text-gray-400 mt-0.5 text-xs">
+                                {s.nepali_date ? formatBS(s.nepali_date) : toBS(s.paid_at)}
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col gap-1">
+                              <span className={
+                                isOverdue ? 'badge-danger' : 'badge-warning'
+                              }>
+                                {isOverdue ? 'Overdue' : 'Upcoming'}
+                              </span>
+                              {selected.status === 'active' && (
+                                <button
+                                  onClick={() => setPayingMonth(s)}
+                                  className="text-xs bg-primary-600
+                                             hover:bg-primary-700 text-white
+                                             px-2 py-0.5 rounded-md
+                                             transition-colors">
+                                  Pay now
+                                </button>
                               )}
                             </div>
-                          ) : isOverdue ? (
-                            <span className="badge-danger">Overdue</span>
-                          ) : (
-                            <span className="badge-warning">Upcoming</span>
                           )}
                         </td>
                       </tr>
@@ -924,8 +849,22 @@ function LoanDetailPanel({
             )}
           </>
         )}
-
       </div>
+
+      {/* Pay now modal */}
+      {payingMonth && (
+        <PayNowModal
+          month={payingMonth}
+          loan={selected}
+          fmt={fmt}
+          onClose={() => setPayingMonth(null)}
+          onSuccess={() => {
+            setPayingMonth(null)
+            onRepay()
+            fetchSchedule()
+          }}
+        />
+      )}
     </>
   )
 }
@@ -971,6 +910,143 @@ function ModalButtons({ onCancel, loading, label }) {
       <button type="submit" disabled={loading} className="btn-primary flex-1">
         {loading ? 'Saving...' : label}
       </button>
+    </div>
+  )
+}
+
+function PayNowModal({ month, loan, fmt, onClose, onSuccess }) {
+  const [amount, setAmount] = useState(String(month.emi || ''))
+  const [note, setNote] = useState('')
+  const [nepaliDate, setNepaliDate] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    setErr('')
+
+    if (!nepaliDate || !String(nepaliDate).trim()) {
+      setErr('Please select the payment date.')
+      return
+    }
+
+    const bsPattern = /^\d{4}-\d{2}-\d{2}$/
+    if (!bsPattern.test(String(nepaliDate).trim())) {
+      setErr('Invalid date format. Expected YYYY-MM-DD (e.g. 2082-02-11)')
+      return
+    }
+
+    if (parseFloat(amount) <= 0) {
+      setErr('Amount must be greater than zero.')
+      return
+    }
+
+    const adDate = new Date().toISOString().split('T')[0]
+
+    setLoading(true)
+    try {
+      await api.post(`/loans/${loan.id}/repay/`, {
+        amount,
+        note,
+        paid_at: adDate,
+        nepali_date: String(nepaliDate).trim(),
+      })
+      onSuccess()
+    } catch (error) {
+      setErr(error.response?.data?.error || 'Payment failed.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 px-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-gray-800">Record repayment</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Month {month.month} · Due: {month.due_date}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">
+            ✕
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+          {err && (
+            <div className="px-3 py-2 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+              {err}
+            </div>
+          )}
+
+          <div className="bg-gray-50 rounded-lg px-4 py-3 grid grid-cols-2 gap-3">
+            <div>
+              <p className="text-xs text-gray-500">Scheduled EMI</p>
+              <p className="text-sm font-semibold text-gray-800">{fmt(month.emi)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Remaining balance</p>
+              <p className="text-sm font-semibold text-red-600">{fmt(loan.amount_remaining)}</p>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Amount paid (Rs.) <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              min="0.01"
+              className="input-field"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              required
+              autoFocus
+            />
+          </div>
+
+          <NepaliDatePicker
+            label="Payment date (Bikram Sambat)"
+            value={nepaliDate}
+            onChange={setNepaliDate}
+            placeholder="Click to select BS date"
+            required
+          />
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Note (optional)
+            </label>
+            <input
+              type="text"
+              className="input-field"
+              placeholder={`Month ${month.month} installment`}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="btn-secondary flex-1"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="btn-primary flex-1"
+            >
+              {loading ? 'Recording...' : 'Confirm payment'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }
