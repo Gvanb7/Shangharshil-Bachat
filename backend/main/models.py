@@ -269,3 +269,81 @@ class MemberDocument(models.Model):
 
     def __str__(self):
         return f'Documents — {self.member.full_name or self.member.email}'
+    
+class Account(models.Model):
+    ACCOUNT_TYPES = [
+        ('cash',    'Cash'),
+        ('bank',    'Bank'),
+        ('digital', 'Digital Wallet'),
+        ('other',   'Other'),
+    ]
+
+    id              = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name            = models.CharField(max_length=100)
+    account_type    = models.CharField(max_length=20, choices=ACCOUNT_TYPES, default='cash')
+    bank_name       = models.CharField(max_length=100, blank=True)
+    account_number  = models.CharField(max_length=50,  blank=True)
+    branch          = models.CharField(max_length=100, blank=True)
+    opening_balance = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    balance         = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    is_active       = models.BooleanField(default=True)
+    created_by      = models.ForeignKey(
+                          settings.AUTH_USER_MODEL,
+                          on_delete=models.SET_NULL,
+                          null=True,
+                          related_name='created_accounts'
+                      )
+    created_at      = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['account_type', 'name']
+
+    def __str__(self):
+        return f'{self.name} ({self.get_account_type_display()})'
+
+
+class AccountTransaction(models.Model):
+    REFERENCE_TYPES = [
+        ('savings_deposit',    'Savings Deposit'),
+        ('savings_withdrawal', 'Savings Withdrawal'),
+        ('loan_disbursement',  'Loan Disbursement'),
+        ('loan_repayment',     'Loan Repayment'),
+        ('income',             'Income'),
+        ('expenditure',        'Expenditure'),
+        ('transfer_in',        'Transfer In'),
+        ('transfer_out',       'Transfer Out'),
+        ('adjustment_add',     'Manual Adjustment (Add)'),
+        ('adjustment_reduce',  'Manual Adjustment (Reduce)'),
+    ]
+
+    id               = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    account          = models.ForeignKey(
+                           Account,
+                           on_delete=models.PROTECT,
+                           related_name='transactions'
+                       )
+    transaction_type = models.CharField(
+                           max_length=10,
+                           choices=[('credit', 'Credit'), ('debit', 'Debit')]
+                       )
+    amount           = models.DecimalField(
+                           max_digits=12, decimal_places=2,
+                           validators=[MinValueValidator(Decimal('0.01'))]
+                       )
+    balance_after    = models.DecimalField(max_digits=12, decimal_places=2)
+    reference_type   = models.CharField(max_length=30, choices=REFERENCE_TYPES)
+    reference_id     = models.UUIDField(null=True, blank=True)
+    note             = models.TextField(blank=True)
+    nepali_date      = models.CharField(max_length=20, blank=True)
+    created_by       = models.ForeignKey(
+                           settings.AUTH_USER_MODEL,
+                           on_delete=models.PROTECT,
+                           related_name='account_transactions'
+                       )
+    created_at       = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.transaction_type} Rs.{self.amount} — {self.account.name}'

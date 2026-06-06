@@ -10,18 +10,19 @@ from django.db import transaction
 from accounts.permissions import IsAdmin, IsMember
 from .models import (
     SavingsAccount, SavingsTransaction, Loan, LoanRepayment, 
-    Expenditure, ExpenditureCategory, Income, IncomeCategory
+    Expenditure, ExpenditureCategory, Income, IncomeCategory, Account, AccountTransaction,
 )
 from .serializers import (
     SavingsAccountSerializer, SavingsTransactionSerializer, 
     DepositWithdrawSerializer, LoanSerializer, LoanRepaymentSerializer,
     RepaymentInputSerializer, ExpenditureSerializer,
-    ExpenditureCategorySerializer, IncomeSerializer, IncomeCategorySerializer
+    ExpenditureCategorySerializer, IncomeSerializer, IncomeCategorySerializer, 
+    AccountSerializer, AccountTransactionSerializer,
 )
 
 from .services import (
     deposit_to_savings, withdraw_from_savings, apply_interest_to_account, disburse_loan, record_loan_repayment,
-    generate_loan_schedule, 
+    generate_loan_schedule, credit_account, debit_account, transfer_between_accounts,
 )
 
 User = get_user_model()
@@ -82,43 +83,91 @@ class AdminSavingsAccountDetailView(APIView):
         return Response(serializer.errors, status=400)
 
 class AdminDepositView(APIView):
-    """Admin deposits money into a member's saving account."""
     permission_classes = [IsAdmin]
 
     @transaction.atomic
     def post(self, request, account_id):
-        account    = get_object_or_404(SavingsAccount, id=account_id, is_active=True)
-        serializer = DepositWithdrawSerializer(data=request.data)
-        if serializer.is_valid():
+        savings_account = get_object_or_404(
+            SavingsAccount, id=account_id, is_active=True
+        )
+        amount     = request.data.get('amount')
+        note       = request.data.get('note', '')
+        acct_id    = request.data.get('account_id')
+        nep_date   = request.data.get('nepali_date', '')
+
+        if not amount:
+            return Response({'error': 'Amount is required.'}, status=400)
+        if not acct_id:
+            return Response(
+                {'error': 'Please select an account (Cash/Bank/etc.).'},
+                status=400
+            )
+
+        try:
+            cash_account = Account.objects.get(id=acct_id, is_active=True)
+        except Account.DoesNotExist:
+            return Response({'error': 'Selected account not found.'}, status=400)
+
+        try:
             txn = deposit_to_savings(
-                account=account,
-                amount=serializer.validated_data['amount'],
+                savings_account, amount, request.user, note
+            )
+            # credit the cash/bank account
+            credit_account(
+                account=cash_account,
+                amount=amount,
+                reference_type='savings_deposit',
+                reference_id=txn.id,
                 recorded_by=request.user,
-                note=serializer.validated_data['note'],
+                note=f'Savings deposit — {savings_account.member.full_name or savings_account.member.email}',
+                nepali_date=nep_date,
             )
             return Response(SavingsTransactionSerializer(txn).data, status=201)
-        return Response(serializer.errors, status=400)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=400)
     
 class AdminWithdrawView(APIView):
-    """Admin withdraws money from a member's savings account."""
     permission_classes = [IsAdmin]
 
     @transaction.atomic
     def post(self, request, account_id):
-        account    = get_object_or_404(SavingsAccount, id=account_id, is_active=True)
-        serializer = DepositWithdrawSerializer(data=request.data)
-        if serializer.is_valid():
-            try:
-                txn = withdraw_from_savings(
-                    account=account,
-                    amount=serializer.validated_data['amount'],
-                    recorded_by=request.user,
-                    note=serializer.validated_data['note'],
-                )
-                return Response(SavingsTransactionSerializer(txn).data, status=201)
-            except ValueError as e:
-                return Response({'error': str(e)}, status=400)
-        return Response(serializer.errors, status=400)
+        savings_account = get_object_or_404(
+            SavingsAccount, id=account_id
+        )
+        amount   = request.data.get('amount')
+        note     = request.data.get('note', '')
+        acct_id  = request.data.get('account_id')
+        nep_date = request.data.get('nepali_date', '')
+
+        if not amount:
+            return Response({'error': 'Amount is required.'}, status=400)
+        if not acct_id:
+            return Response(
+                {'error': 'Please select an account (Cash/Bank/etc.).'},
+                status=400
+            )
+
+        try:
+            cash_account = Account.objects.get(id=acct_id, is_active=True)
+        except Account.DoesNotExist:
+            return Response({'error': 'Selected account not found.'}, status=400)
+
+        try:
+            txn = withdraw_from_savings(
+                savings_account, amount, request.user, note
+            )
+            debit_account(
+                account=cash_account,
+                amount=amount,
+                reference_type='savings_withdrawal',
+                reference_id=txn.id,
+                recorded_by=request.user,
+                note=f'Savings withdrawal — {savings_account.member.full_name or savings_account.member.email}',
+                nepali_date=nep_date,
+            )
+            return Response(SavingsTransactionSerializer(txn).data, status=201)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=400)
     
 class AdminApplyInterestView(APIView):
     """Admin applies monthly interest to ALL active savings accounts at once."""
@@ -269,25 +318,63 @@ class AdminRejectLoanView(APIView):
         return Response({'message': 'Loan rejected.'})
 
 class AdminDisburseLoanView(APIView):
-    """Admin disburses an approved loan — activates it."""
     permission_classes = [IsAdmin]
 
     @transaction.atomic
     def post(self, request, loan_id):
-        loan = get_object_or_404(Loan, id=loan_id, status='approved')
-        loan = disburse_loan(loan)
-        return Response({
-            'message': 'Loan disbursed and is now active.',
-            'loan':    LoanSerializer(loan).data,
-        })
+        loan     = get_object_or_404(Loan, id=loan_id, status='approved')
+        acct_id  = request.data.get('account_id')
+        nep_date = request.data.get('nepali_date', '')
+
+        if not acct_id:
+            return Response(
+                {'error': 'Please select an account to disburse from.'},
+                status=400
+            )
+
+        try:
+            cash_account = Account.objects.get(id=acct_id, is_active=True)
+        except Account.DoesNotExist:
+            return Response({'error': 'Selected account not found.'}, status=400)
+
+        try:
+            from django.utils import timezone
+            disbursed_on = timezone.now().date()
+            disburse_loan(loan, disbursed_on)
+
+            debit_account(
+                account=cash_account,
+                amount=loan.principal,
+                reference_type='loan_disbursement',
+                reference_id=loan.id,
+                recorded_by=request.user,
+                note=f'Loan disbursement — {loan.member.full_name or loan.member.email}',
+                nepali_date=nep_date,
+            )
+            return Response(LoanSerializer(loan).data)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=400)
         
 class AdminRecordRepaymentView(APIView):
-    """Admin records a loan repayment from a member."""
     permission_classes = [IsAdmin]
 
     @transaction.atomic
     def post(self, request, loan_id):
-        loan       = get_object_or_404(Loan, id=loan_id, status='active')
+        loan     = get_object_or_404(Loan, id=loan_id, status='active')
+        acct_id  = request.data.get('account_id')
+        nep_date = request.data.get('nepali_date', '')
+
+        if not acct_id:
+            return Response(
+                {'error': 'Please select an account for this repayment.'},
+                status=400
+            )
+
+        try:
+            cash_account = Account.objects.get(id=acct_id, is_active=True)
+        except Account.DoesNotExist:
+            return Response({'error': 'Selected account not found.'}, status=400)
+
         serializer = RepaymentInputSerializer(data=request.data)
         if serializer.is_valid():
             try:
@@ -295,15 +382,25 @@ class AdminRecordRepaymentView(APIView):
                     loan=loan,
                     amount_paid=serializer.validated_data['amount'],
                     recorded_by=request.user,
-                    paid_at = serializer.validated_data['paid_at'],
-                    nepali_date = serializer.validated_data['nepali_date'],
+                    paid_at=serializer.validated_data['paid_at'],
+                    nepali_date=nep_date,
                     note=serializer.validated_data['note'],
                 )
-                return Response(LoanRepaymentSerializer(repayment).data, status=201)
+                credit_account(
+                    account=cash_account,
+                    amount=serializer.validated_data['amount'],
+                    reference_type='loan_repayment',
+                    reference_id=repayment.id,
+                    recorded_by=request.user,
+                    note=f'Loan repayment — {loan.member.full_name or loan.member.email}',
+                    nepali_date=nep_date,
+                )
+                return Response(
+                    LoanRepaymentSerializer(repayment).data, status=201
+                )
             except ValueError as e:
                 return Response({'error': str(e)}, status=400)
         return Response(serializer.errors, status=400)
-
 
 class AdminLoanRepaymentListView(APIView):
     """Admin views all repayments for a loan."""
@@ -369,18 +466,45 @@ class AdminLoanScheduleView(APIView):
 #--------Expenditure-----
 
 class AdminExpenditureView(APIView):
-    """Admin creates and lists expenditures."""
     permission_classes = [IsAdmin]
 
     def get(self, request):
-        expenditures = Expenditure.objects.select_related('recorded_by').all()
+        expenditures = Expenditure.objects.select_related(
+            'category', 'recorded_by'
+        ).all()
         return Response(ExpenditureSerializer(expenditures, many=True).data)
 
     @transaction.atomic
     def post(self, request):
+        acct_id  = request.data.get('account_id')
+        nep_date = request.data.get('nepali_date', '')
+
+        if not acct_id:
+            return Response(
+                {'error': 'Please select an account for this expenditure.'},
+                status=400
+            )
+
+        try:
+            cash_account = Account.objects.get(id=acct_id, is_active=True)
+        except Account.DoesNotExist:
+            return Response({'error': 'Selected account not found.'}, status=400)
+
         serializer = ExpenditureSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save(recorded_by=request.user)
+            expenditure = serializer.save(recorded_by=request.user)
+            try:
+                debit_account(
+                    account=cash_account,
+                    amount=expenditure.amount,
+                    reference_type='expenditure',
+                    reference_id=expenditure.id,
+                    recorded_by=request.user,
+                    note=expenditure.description,
+                    nepali_date=nep_date,
+                )
+            except ValueError as e:
+                raise transaction.TransactionManagementError(str(e))
             return Response(serializer.data, status=201)
         return Response(serializer.errors, status=400)
 
@@ -480,9 +604,32 @@ class AdminIncomeView(APIView):
 
     @transaction.atomic
     def post(self, request):
+        acct_id  = request.data.get('account_id')
+        nep_date = request.data.get('nepali_date', '')
+
+        if not acct_id:
+            return Response(
+                {'error': 'Please select an account for this income.'},
+                status=400
+            )
+
+        try:
+            cash_account = Account.objects.get(id=acct_id, is_active=True)
+        except Account.DoesNotExist:
+            return Response({'error': 'Selected account not found.'}, status=400)
+
         serializer = IncomeSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save(recorded_by=request.user)
+            income = serializer.save(recorded_by=request.user)
+            credit_account(
+                account=cash_account,
+                amount=income.amount,
+                reference_type='income',
+                reference_id=income.id,
+                recorded_by=request.user,
+                note=income.description,
+                nepali_date=nep_date,
+            )
             return Response(serializer.data, status=201)
         return Response(serializer.errors, status=400)
 
@@ -572,3 +719,169 @@ class MemberApplyLoanView(APIView):
         loan.delete()
         return Response({'message': 'Loan application cancelled.'})
     
+class AdminAccountListCreateView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        accounts = Account.objects.filter(is_active=True)
+        return Response(AccountSerializer(accounts, many=True).data)
+
+    def post(self, request):
+        serializer = AccountSerializer(data=request.data)
+        if serializer.is_valid():
+            account = serializer.save(created_by=request.user)
+            # set opening balance as initial balance
+            account.balance = account.opening_balance
+            account.save()
+            # record opening balance as a transaction if > 0
+            if account.opening_balance > 0:
+                AccountTransaction.objects.create(
+                    account=account,
+                    transaction_type='credit',
+                    amount=account.opening_balance,
+                    balance_after=account.balance,
+                    reference_type='adjustment_add',
+                    note='Opening balance',
+                    created_by=request.user,
+                )
+            return Response(AccountSerializer(account).data, status=201)
+        return Response(serializer.errors, status=400)
+
+
+class AdminAccountDetailView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request, account_id):
+        account = get_object_or_404(Account, id=account_id)
+        return Response(AccountSerializer(account).data)
+
+    def patch(self, request, account_id):
+        account    = get_object_or_404(Account, id=account_id)
+        serializer = AccountSerializer(
+            account, data=request.data, partial=True
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=400)
+
+    def delete(self, request, account_id):
+        account = get_object_or_404(Account, id=account_id)
+        if account.transactions.count() > 0:
+            account.is_active = False
+            account.save()
+            return Response(
+                {'message': 'Account deactivated (has transactions).'}
+            )
+        account.delete()
+        return Response({'message': 'Account deleted.'}, status=204)
+
+
+class AdminAccountTransactionListView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request, account_id):
+        account = get_object_or_404(Account, id=account_id)
+        txns    = AccountTransaction.objects.filter(
+            account=account
+        ).select_related('created_by')
+        return Response(
+            AccountTransactionSerializer(txns, many=True).data
+        )
+
+
+class AdminAccountAdjustView(APIView):
+    """Manual balance adjustment."""
+    permission_classes = [IsAdmin]
+
+    @transaction.atomic
+    def post(self, request, account_id):
+        account    = get_object_or_404(Account, id=account_id, is_active=True)
+        adj_type   = request.data.get('type')     # 'add' or 'reduce'
+        amount     = request.data.get('amount')
+        note       = request.data.get('note', '')
+        nep_date   = request.data.get('nepali_date', '')
+
+        if adj_type not in ['add', 'reduce']:
+            return Response(
+                {'error': 'Type must be "add" or "reduce".'},
+                status=400
+            )
+        if not amount:
+            return Response({'error': 'Amount is required.'}, status=400)
+
+        try:
+            if adj_type == 'add':
+                credit_account(
+                    account=account,
+                    amount=amount,
+                    reference_type='adjustment_add',
+                    reference_id=None,
+                    recorded_by=request.user,
+                    note=note or 'Manual adjustment (add)',
+                    nepali_date=nep_date,
+                )
+            else:
+                debit_account(
+                    account=account,
+                    amount=amount,
+                    reference_type='adjustment_reduce',
+                    reference_id=None,
+                    recorded_by=request.user,
+                    note=note or 'Manual adjustment (reduce)',
+                    nepali_date=nep_date,
+                )
+            return Response(AccountSerializer(account).data)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=400)
+
+
+class AdminAccountTransferView(APIView):
+    permission_classes = [IsAdmin]
+
+    @transaction.atomic
+    def post(self, request):
+        from_id  = request.data.get('from_account')
+        to_id    = request.data.get('to_account')
+        amount   = request.data.get('amount')
+        note     = request.data.get('note', '')
+        nep_date = request.data.get('nepali_date', '')
+
+        if not from_id or not to_id:
+            return Response(
+                {'error': 'Both from and to accounts are required.'},
+                status=400
+            )
+        if from_id == to_id:
+            return Response(
+                {'error': 'Cannot transfer to the same account.'},
+                status=400
+            )
+        if not amount:
+            return Response({'error': 'Amount is required.'}, status=400)
+
+        try:
+            from_account = Account.objects.get(id=from_id, is_active=True)
+            to_account   = Account.objects.get(id=to_id,   is_active=True)
+        except Account.DoesNotExist:
+            return Response(
+                {'error': 'One or both accounts not found.'},
+                status=400
+            )
+
+        try:
+            transfer_between_accounts(
+                from_account=from_account,
+                to_account=to_account,
+                amount=amount,
+                recorded_by=request.user,
+                note=note,
+                nepali_date=nep_date,
+            )
+            return Response({
+                'message':      f'Transfer successful.',
+                'from_account': AccountSerializer(from_account).data,
+                'to_account':   AccountSerializer(to_account).data,
+            })
+        except ValueError as e:
+            return Response({'error': str(e)}, status=400)

@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import AdminLayout from '../../components/AdminLayout'
 import api from '../../lib/api'
 import { toBS } from '../../lib/nepaliDate'
+import useAccounts from '../../hooks/useAccounts'
 
 const EMPTY_FORM = {
-  category: '', amount: '', description: '', expense_date: '',
+  category: '', amount: '', description: '', expense_date: '', account_id: '',
+  nepali_date: '',
 }
 
 export default function AdminExpenditure() {
@@ -13,6 +15,7 @@ export default function AdminExpenditure() {
   const [loading,          setLoading]          = useState(true)
   const [error,            setError]            = useState('')
   const [successMsg,       setSuccessMsg]       = useState('')
+  const { accounts } = useAccounts()
 
   const [showForm,         setShowForm]         = useState(false)
   const [editItem,         setEditItem]         = useState(null)
@@ -95,6 +98,14 @@ export default function AdminExpenditure() {
     }
     if (parseFloat(form.amount) <= 0) {
       setFormErr('Amount must be greater than zero.')
+      return
+    }
+    if (!form.account_id) {
+      setFormErr('Please select an account.')
+      return
+    }
+    if (!form.nepali_date) {
+      setFormErr('Please enter the date.')
       return
     }
     setFormLoad(true)
@@ -473,6 +484,38 @@ export default function AdminExpenditure() {
                   placeholder="0.00"
                   value={form.amount}
                   onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Account <span className="text-red-500">*</span>
+                </label>
+                <select
+                  className="input-field"
+                  value={form.account_id}
+                  onChange={(e) => setForm({ ...form, account_id: e.target.value })}
+                  required>
+                  <option value="">Select account...</option>
+                  {accounts.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} (Rs. {parseFloat(a.balance).toLocaleString('en-NP')})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Date (BS) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  className="input-field font-mono"
+                  placeholder="2082-02-11"
+                  value={form.nepali_date}
+                  onChange={(e) => setForm({ ...form, nepali_date: e.target.value })}
                   required
                 />
               </div>

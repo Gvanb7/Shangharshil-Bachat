@@ -3,6 +3,7 @@ import AdminLayout from '../../components/AdminLayout'
 import api from '../../lib/api'
 import NepaliDatePicker from '../../components/NepaliDatePicker'
 import { toBS, formatBS } from '../../lib/nepaliDate'
+import useAccounts from '../../hooks/useAccounts'
 
 const EMPTY_LOAN_FORM = {
   member: '', principal: '', interest_rate: '12.00',
@@ -17,6 +18,7 @@ export default function AdminLoans() {
   const [successMsg,   setSuccessMsg]   = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [search,       setSearch]       = useState('')
+  const { accounts } = useAccounts()
 
   const [selected,   setSelected]   = useState(null)
   const [repayments, setRepayments] = useState([])
@@ -35,6 +37,13 @@ export default function AdminLoans() {
   })
   const [approveErr,  setApproveErr]  = useState('')
   const [approveLoad, setApproveLoad] = useState(false)
+  const [showDisburse,  setShowDisburse]  = useState(false)
+  const [disburseTarget,setDisburseTarget]= useState(null)
+  const [disburseForm,  setDisburseForm]  = useState({
+    account_id: '', nepali_date: ''
+  })
+  const [disburseErr,  setDisburseErr]  = useState('')
+  const [disburseLoad, setDisburseLoad] = useState(false)
 
   useEffect(() => { fetchAll() }, [])
 
@@ -177,20 +186,38 @@ export default function AdminLoans() {
     }
   }
 
-  async function handleDisburse(loan) {
-    if (!window.confirm(
-      `Disburse Rs. ${loan.principal} to ${loan.member_name}? This will activate the loan.`
-    )) return
+  function handleDisburse(loan) {
+  setDisburseTarget(loan)
+  setDisburseForm({ account_id: '', nepali_date: '' })
+  setDisburseErr('')
+  setShowDisburse(true)
+  }
+
+  async function submitDisburse(e) {
+    e.preventDefault()
+    setDisburseErr('')
+    if (!disburseForm.account_id) {
+      setDisburseErr('Please select an account.')
+      return
+    }
+    if (!disburseForm.nepali_date) {
+      setDisburseErr('Please enter the date.')
+      return
+    }
+    setDisburseLoad(true)
     try {
-      await api.post(`/loans/${loan.id}/disburse/`)
+      await api.post(`/loans/${disburseTarget.id}/disburse/`, disburseForm)
       flash('Loan disbursed and is now active.')
+      setShowDisburse(false)
       fetchAll()
-      if (selected?.id === loan.id) {
-        const res = await api.get(`/loans/${loan.id}/`)
+      if (selected?.id === disburseTarget.id) {
+        const res = await api.get(`/loans/${disburseTarget.id}/`)
         setSelected(res.data)
       }
-    } catch {
-      setError('Failed to disburse loan.')
+    } catch (err) {
+      setDisburseErr(err.response?.data?.error || 'Failed to disburse loan.')
+    } finally {
+      setDisburseLoad(false)
     }
   }
 
@@ -378,6 +405,7 @@ export default function AdminLoans() {
                 selected={selected}
                 repayments={repayments}
                 repayLoad={repayLoad}
+                accounts={accounts}
                 onRepay={() => {
                   fetchAll()
                   fetchRepayments(selected.id)
@@ -579,6 +607,69 @@ export default function AdminLoans() {
         </Modal>
       )}
 
+      {showDisburse && disburseTarget && (
+        <Modal
+          title={`Disburse loan — ${disburseTarget.member_name}`}
+          onClose={() => setShowDisburse(false)}>
+          <form onSubmit={submitDisburse} className="space-y-4">
+            {disburseErr && <ErrorBox msg={disburseErr} />}
+
+            <div className="bg-gray-50 rounded-lg px-4 py-3">
+              <p className="text-xs text-gray-500">Disbursement amount</p>
+              <p className="text-lg font-bold text-gray-800">
+                {fmt(disburseTarget.principal)}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                To: {disburseTarget.member_name}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Disburse from account <span className="text-red-500">*</span>
+              </label>
+              <select
+                className="input-field"
+                value={disburseForm.account_id}
+                onChange={(e) => setDisburseForm({
+                  ...disburseForm, account_id: e.target.value
+                })}
+                required>
+                <option value="">Select account...</option>
+                {accounts.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} (Rs. {parseFloat(a.balance).toLocaleString('en-NP')})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Disbursement date (BS) <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                className="input-field font-mono"
+                placeholder="2082-02-11"
+                value={disburseForm.nepali_date}
+                onChange={(e) => setDisburseForm({
+                  ...disburseForm, nepali_date: e.target.value
+                })}
+                required
+              />
+            </div>
+
+            <ModalButtons
+              onCancel={() => setShowDisburse(false)}
+              loading={disburseLoad}
+              label="Disburse loan"
+            />
+          </form>
+        </Modal>
+      )}
+
+
     </AdminLayout>
   )
 }
@@ -586,7 +677,7 @@ export default function AdminLoans() {
 // ── Loan detail panel ─────────────────────────────────────────────────────────
 
 function LoanDetailPanel({
-  selected, repayments, repayLoad, onRepay, fmt, STATUS_BADGE
+  selected, repayments, repayLoad, onRepay, fmt, STATUS_BADGE, accounts = []
 }) {
   const [schedule,     setSchedule]     = useState([])
   const [scheduleLoad, setScheduleLoad] = useState(false)
@@ -857,6 +948,7 @@ function LoanDetailPanel({
           month={payingMonth}
           loan={selected}
           fmt={fmt}
+          accounts={accounts}
           onClose={() => setPayingMonth(null)}
           onSuccess={() => {
             setPayingMonth(null)
@@ -914,42 +1006,43 @@ function ModalButtons({ onCancel, loading, label }) {
   )
 }
 
-function PayNowModal({ month, loan, fmt, onClose, onSuccess }) {
-  const [amount, setAmount] = useState(String(month.emi || ''))
-  const [note, setNote] = useState('')
+function PayNowModal({ month, loan, fmt, onClose, onSuccess, accounts }) {
+  const [amount,     setAmount]     = useState(month.emi)
+  const [note,       setNote]       = useState('')
   const [nepaliDate, setNepaliDate] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [err, setErr] = useState('')
+  const [accountId,  setAccountId]  = useState('')
+  const [loading,    setLoading]    = useState(false)
+  const [err,        setErr]        = useState('')
 
   async function handleSubmit(e) {
     e.preventDefault()
     setErr('')
-
-    if (!nepaliDate || !String(nepaliDate).trim()) {
-      setErr('Please select the payment date.')
+    if (!accountId) {
+      setErr('Please select an account.')
       return
     }
-
+    if (!nepaliDate.trim()) {
+      setErr('Please enter the payment date.')
+      return
+    }
     const bsPattern = /^\d{4}-\d{2}-\d{2}$/
-    if (!bsPattern.test(String(nepaliDate).trim())) {
-      setErr('Invalid date format. Expected YYYY-MM-DD (e.g. 2082-02-11)')
+    if (!bsPattern.test(nepaliDate.trim())) {
+      setErr('Date must be YYYY-MM-DD format (e.g. 2082-02-11)')
       return
     }
-
     if (parseFloat(amount) <= 0) {
       setErr('Amount must be greater than zero.')
       return
     }
-
     const adDate = new Date().toISOString().split('T')[0]
-
     setLoading(true)
     try {
       await api.post(`/loans/${loan.id}/repay/`, {
-        amount,
-        note,
-        paid_at: adDate,
-        nepali_date: String(nepaliDate).trim(),
+        amount:      amount,
+        note:        note,
+        paid_at:     adDate,
+        nepali_date: nepaliDate.trim(),
+        account_id:  accountId,
       })
       onSuccess()
     } catch (error) {
@@ -960,35 +1053,36 @@ function PayNowModal({ month, loan, fmt, onClose, onSuccess }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 px-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center
+                    bg-black bg-opacity-40 px-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+        <div className="px-6 py-4 border-b border-gray-200 flex
+                        items-center justify-between">
           <div>
             <h3 className="font-semibold text-gray-800">Record repayment</h3>
             <p className="text-xs text-gray-500 mt-0.5">
               Month {month.month} · Due: {month.due_date}
             </p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">
-            ✕
-          </button>
+          <button onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
         </div>
 
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-          {err && (
-            <div className="px-3 py-2 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
-              {err}
-            </div>
-          )}
+          {err && <ErrorBox msg={err} />}
 
           <div className="bg-gray-50 rounded-lg px-4 py-3 grid grid-cols-2 gap-3">
             <div>
               <p className="text-xs text-gray-500">Scheduled EMI</p>
-              <p className="text-sm font-semibold text-gray-800">{fmt(month.emi)}</p>
+              <p className="text-sm font-semibold text-gray-800">
+                {fmt(month.emi)}
+              </p>
             </div>
             <div>
               <p className="text-xs text-gray-500">Remaining balance</p>
-              <p className="text-sm font-semibold text-red-600">{fmt(loan.amount_remaining)}</p>
+              <p className="text-sm font-semibold text-red-600">
+                {fmt(loan.amount_remaining)}
+              </p>
             </div>
           </div>
 
@@ -997,32 +1091,55 @@ function PayNowModal({ month, loan, fmt, onClose, onSuccess }) {
               Amount paid (Rs.) <span className="text-red-500">*</span>
             </label>
             <input
-              type="number"
-              step="0.01"
-              min="0.01"
+              type="number" step="0.01" min="0.01"
               className="input-field"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              required
-              autoFocus
+              required autoFocus
             />
           </div>
 
-          <NepaliDatePicker
-            label="Payment date (Bikram Sambat)"
-            value={nepaliDate}
-            onChange={setNepaliDate}
-            placeholder="Click to select BS date"
-            required
-          />
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Received in account <span className="text-red-500">*</span>
+            </label>
+            <select
+              className="input-field"
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+              required>
+              <option value="">Select account...</option>
+              {accounts.map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.name} (Rs. {parseFloat(a.balance).toLocaleString('en-NP')})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Payment date (BS) <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              className="input-field font-mono"
+              placeholder="2082-02-11"
+              value={nepaliDate}
+              onChange={(e) => setNepaliDate(e.target.value)}
+              required
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              Enter BS date in YYYY-MM-DD format
+            </p>
+          </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Note (optional)
             </label>
             <input
-              type="text"
-              className="input-field"
+              type="text" className="input-field"
               placeholder={`Month ${month.month} installment`}
               value={note}
               onChange={(e) => setNote(e.target.value)}
@@ -1030,18 +1147,10 @@ function PayNowModal({ month, loan, fmt, onClose, onSuccess }) {
           </div>
 
           <div className="flex gap-3 pt-1">
-            <button
-              type="button"
-              onClick={onClose}
-              className="btn-secondary flex-1"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="btn-primary flex-1"
-            >
+            <button type="button" onClick={onClose}
+              className="btn-secondary flex-1">Cancel</button>
+            <button type="submit" disabled={loading}
+              className="btn-primary flex-1">
               {loading ? 'Recording...' : 'Confirm payment'}
             </button>
           </div>

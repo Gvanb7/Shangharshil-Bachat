@@ -2,7 +2,7 @@ from rest_framework import serializers
 from decimal import Decimal
 from .models import(
     SavingsAccount, SavingsTransaction, Loan, LoanRepayment, Expenditure,
-    ExpenditureCategory, Income, IncomeCategory, MemberDocument
+    ExpenditureCategory, Income, IncomeCategory, MemberDocument, Account, AccountTransaction
 )
 from .services import calculate_loan_summary
 
@@ -203,3 +203,53 @@ class MemberDocumentSerializer(serializers.ModelSerializer):
 
     def get_signature_url(self, obj):
         return self._build_url(obj, 'signature')
+    
+class AccountSerializer(serializers.ModelSerializer):
+    account_type_display = serializers.CharField(
+        source='get_account_type_display', read_only=True
+    )
+    created_by_name = serializers.CharField(
+        source='created_by.full_name', read_only=True
+    )
+
+    class Meta:
+        model  = Account
+        fields = [
+            'id', 'name', 'account_type', 'account_type_display',
+            'bank_name', 'account_number', 'branch',
+            'opening_balance', 'balance', 'is_active',
+            'created_by_name', 'created_at',
+        ]
+        read_only_fields = ['id', 'balance', 'created_at']
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('Account name is required.')
+        return value
+
+    def validate_opening_balance(self, value):
+        if value < 0:
+            raise serializers.ValidationError(
+                'Opening balance cannot be negative.'
+            )
+        return value
+
+
+class AccountTransactionSerializer(serializers.ModelSerializer):
+    created_by_name = serializers.CharField(
+        source='created_by.full_name', read_only=True
+    )
+    account_name = serializers.CharField(
+        source='account.name', read_only=True
+    )
+
+    class Meta:
+        model  = AccountTransaction
+        fields = [
+            'id', 'account', 'account_name', 'transaction_type',
+            'amount', 'balance_after', 'reference_type',
+            'reference_id', 'note', 'nepali_date',
+            'created_by_name', 'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']

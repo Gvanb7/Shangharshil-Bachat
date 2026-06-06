@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import AdminLayout from '../../components/AdminLayout'
 import api from '../../lib/api'
 import { toBS } from '../../lib/nepaliDate'
+import useAccounts from '../../hooks/useAccounts'
 
 const EMPTY_FORM = {
   category: '', amount: '', description: '', income_date: '',
+  account_id: '', nepali_date: '',
 }
 
 export default function AdminIncome() {
@@ -13,6 +15,7 @@ export default function AdminIncome() {
   const [loading,          setLoading]          = useState(true)
   const [error,            setError]            = useState('')
   const [successMsg,       setSuccessMsg]       = useState('')
+  const { accounts } = useAccounts()
 
   const [showForm,         setShowForm]         = useState(false)
   const [editItem,         setEditItem]         = useState(null)
@@ -96,6 +99,15 @@ export default function AdminIncome() {
       setFormErr('Amount must be greater than zero.')
       return
     }
+    if (!form.account_id) {
+      setFormErr('Please select an account.')
+      return
+    }
+    if (!form.nepali_date){
+      setForm.nepali_date = toBS(form.income_date)
+      return
+    }
+
     setFormLoad(true)
     try {
       if (editItem) {
@@ -472,6 +484,38 @@ export default function AdminIncome() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Received in account <span className="text-red-500">*</span>
+                </label>
+                <select
+                  className="input-field"
+                  value={form.account_id}
+                  onChange={(e) => setForm({ ...form, account_id: e.target.value })}
+                  required>
+                  <option value="">Select account...</option>
+                  {accounts.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} — Rs. {parseFloat(a.balance).toLocaleString('en-NP')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Date (BS) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  className="input-field font-mono"
+                  placeholder="2082-02-11"
+                  value={form.nepali_date}
+                  onChange={(e) => setForm({ ...form, nepali_date: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Description <span className="text-red-500">*</span>
                 </label>
                 <textarea
@@ -484,7 +528,7 @@ export default function AdminIncome() {
                 />
               </div>
 
-              <div>
+              <div className="hidden">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Date <span className="text-red-500">*</span>
                 </label>

@@ -247,3 +247,84 @@ def generate_loan_schedule(loan):
         })
 
     return schedule
+
+def credit_account(account, amount, reference_type, reference_id,
+                   recorded_by, note='', nepali_date=''):
+    """Add money to an account."""
+    from .models import AccountTransaction
+    from decimal import Decimal
+
+    amount = round2(Decimal(str(amount)))
+    account.balance = round2(account.balance + amount)
+    account.save()
+
+    return AccountTransaction.objects.create(
+        account=account,
+        transaction_type='credit',
+        amount=amount,
+        balance_after=account.balance,
+        reference_type=reference_type,
+        reference_id=reference_id,
+        note=note,
+        nepali_date=nepali_date,
+        created_by=recorded_by,
+    )
+
+
+def debit_account(account, amount, reference_type, reference_id,
+                  recorded_by, note='', nepali_date=''):
+    """Deduct money from an account."""
+    from .models import AccountTransaction
+    from decimal import Decimal
+
+    amount = round2(Decimal(str(amount)))
+
+    if account.balance < amount:
+        raise ValueError(
+            f'Insufficient balance in {account.name}. '
+            f'Available: Rs. {account.balance}, Required: Rs. {amount}'
+        )
+
+    account.balance = round2(account.balance - amount)
+    account.save()
+
+    return AccountTransaction.objects.create(
+        account=account,
+        transaction_type='debit',
+        amount=amount,
+        balance_after=account.balance,
+        reference_type=reference_type,
+        reference_id=reference_id,
+        note=note,
+        nepali_date=nepali_date,
+        created_by=recorded_by,
+    )
+
+
+def transfer_between_accounts(from_account, to_account, amount,
+                               recorded_by, note='', nepali_date=''):
+    """Transfer money between two accounts."""
+    from decimal import Decimal
+    import uuid
+
+    amount     = round2(Decimal(str(amount)))
+    ref_id     = uuid.uuid4()
+
+    debit_account(
+        account=from_account,
+        amount=amount,
+        reference_type='transfer_out',
+        reference_id=ref_id,
+        recorded_by=recorded_by,
+        note=f'Transfer to {to_account.name}' + (f' — {note}' if note else ''),
+        nepali_date=nepali_date,
+    )
+    credit_account(
+        account=to_account,
+        amount=amount,
+        reference_type='transfer_in',
+        reference_id=ref_id,
+        recorded_by=recorded_by,
+        note=f'Transfer from {from_account.name}' + (f' — {note}' if note else ''),
+        nepali_date=nepali_date,
+    )

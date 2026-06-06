@@ -2,40 +2,40 @@ import { useEffect, useState } from 'react'
 import AdminLayout from '../../components/AdminLayout'
 import api from '../../lib/api'
 import { toBS } from '../../lib/nepaliDate'
+import useAccounts from '../../hooks/useAccounts'
 
 const EMPTY_ACCOUNT_FORM = { member_id: '', interest_rate: '6.00' }
-const EMPTY_TXN_FORM     = { amount: '', note: '' }
+const EMPTY_TXN_FORM = { amount: '', note: '', account_id: '', nepali_date: '' }
 
 export default function AdminSavings() {
-  const [accounts,    setAccounts]    = useState([])
-  const [members,     setMembers]     = useState([])
-  const [loading,     setLoading]     = useState(true)
-  const [error,       setError]       = useState('')
-  const [successMsg,  setSuccessMsg]  = useState('')
+  const [savingsAccounts, setSavingsAccounts] = useState([])  // renamed to avoid conflict
+  const [members,         setMembers]         = useState([])
+  const [loading,         setLoading]         = useState(true)
+  const [error,           setError]           = useState('')
+  const [successMsg,      setSuccessMsg]       = useState('')
   const [showInterestModal, setShowInterestModal] = useState(false)
   const [interestResult,    setInterestResult]    = useState(null)
 
-  // selected account for transactions
-  const [selected,    setSelected]    = useState(null)
-  const [txns,        setTxns]        = useState([])
-  const [txnLoading,  setTxnLoading]  = useState(false)
+  const [selected,   setSelected]   = useState(null)
+  const [txns,       setTxns]       = useState([])
+  const [txnLoading, setTxnLoading] = useState(false)
 
-  // modals
-  const [showCreate,  setShowCreate]  = useState(false)
-  const [showDeposit, setShowDeposit] = useState(false)
-  const [showWithdraw,setShowWithdraw]= useState(false)
+  const [showCreate,   setShowCreate]   = useState(false)
+  const [showDeposit,  setShowDeposit]  = useState(false)
+  const [showWithdraw, setShowWithdraw] = useState(false)
 
   const [accountForm, setAccountForm] = useState(EMPTY_ACCOUNT_FORM)
   const [txnForm,     setTxnForm]     = useState(EMPTY_TXN_FORM)
   const [formErr,     setFormErr]     = useState('')
   const [formLoad,    setFormLoad]    = useState(false)
 
-  const [search,      setSearch]      = useState('')
-  const [interestLoad,setInterestLoad]= useState(false)
+  const [search,       setSearch]       = useState('')
+  const [interestLoad, setInterestLoad] = useState(false)
 
-  useEffect(() => {
-    fetchAll()
-  }, [])
+  // cash/bank accounts from useAccounts hook
+  const { accounts: cashAccounts } = useAccounts()
+
+  useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
     setLoading(true)
@@ -44,7 +44,7 @@ export default function AdminSavings() {
         api.get('/savings/'),
         api.get('/admin/members/'),
       ])
-      setAccounts(accRes.data)
+      setSavingsAccounts(accRes.data)
       setMembers(memRes.data.filter(m => m.is_active))
     } catch {
       setError('Failed to load savings data.')
@@ -84,9 +84,8 @@ export default function AdminSavings() {
     setFormErr('')
   }
 
-  // members without savings account
   const membersWithoutAccount = members.filter(
-    m => !accounts.find(a => a.member === m.id)
+    m => !savingsAccounts.find(a => a.member === m.id)
   )
 
   async function handleCreateAccount(e) {
@@ -114,6 +113,14 @@ export default function AdminSavings() {
   async function handleDeposit(e) {
     e.preventDefault()
     setFormErr('')
+    if (!txnForm.account_id) {
+      setFormErr('Please select an account.')
+      return
+    }
+    if (!txnForm.nepali_date) {
+      setFormErr('Please enter the date.')
+      return
+    }
     if (parseFloat(txnForm.amount) <= 0) {
       setFormErr('Amount must be greater than zero.')
       return
@@ -125,7 +132,6 @@ export default function AdminSavings() {
       closeAll()
       fetchAll()
       fetchTxns(selected.id)
-      // refresh selected account balance
       const res = await api.get(`/savings/${selected.id}/`)
       setSelected(res.data)
     } catch (err) {
@@ -138,6 +144,14 @@ export default function AdminSavings() {
   async function handleWithdraw(e) {
     e.preventDefault()
     setFormErr('')
+    if (!txnForm.account_id) {
+      setFormErr('Please select an account.')
+      return
+    }
+    if (!txnForm.nepali_date) {
+      setFormErr('Please enter the date.')
+      return
+    }
     if (parseFloat(txnForm.amount) <= 0) {
       setFormErr('Amount must be greater than zero.')
       return
@@ -159,25 +173,25 @@ export default function AdminSavings() {
   }
 
   async function handleApplyInterest() {
-   setInterestLoad(true)
-   setError('')
-   try {
-     const res = await api.post('/savings/apply-interest/')
-     setInterestResult(res.data)
-     setShowInterestModal(true)
-     fetchAll()
-     if (selected) fetchTxns(selected.id)
-   } catch (err) {
-     const data = err.response?.data
-     if (data?.status === 'already_applied') {
-       setInterestResult(data)
-       setShowInterestModal(true)
-     } else {
-       setError('Failed to apply interest.')
-     }
-   } finally {
-     setInterestLoad(false)
-   }
+    setInterestLoad(true)
+    setError('')
+    try {
+      const res = await api.post('/savings/apply-interest/')
+      setInterestResult(res.data)
+      setShowInterestModal(true)
+      fetchAll()
+      if (selected) fetchTxns(selected.id)
+    } catch (err) {
+      const data = err.response?.data
+      if (data?.status === 'already_applied') {
+        setInterestResult(data)
+        setShowInterestModal(true)
+      } else {
+        setError('Failed to apply interest.')
+      }
+    } finally {
+      setInterestLoad(false)
+    }
   }
 
   function fmt(amount) {
@@ -192,7 +206,7 @@ export default function AdminSavings() {
     interest_credit: 'badge-info',
   }
 
-  const filtered = accounts.filter((a) => {
+  const filtered = savingsAccounts.filter((a) => {
     const q = search.toLowerCase()
     return (
       a.member_name?.toLowerCase().includes(q) ||
@@ -200,7 +214,7 @@ export default function AdminSavings() {
     )
   })
 
-  const totalSavings = accounts.reduce(
+  const totalSavings = savingsAccounts.reduce(
     (sum, a) => sum + parseFloat(a.balance || 0), 0
   )
 
@@ -213,12 +227,12 @@ export default function AdminSavings() {
           <div>
             <h2 className="text-lg font-semibold text-gray-800">Savings</h2>
             <p className="text-sm text-gray-500">
-              {accounts.length} accounts · Total {fmt(totalSavings)}
+              {savingsAccounts.length} accounts · Total {fmt(totalSavings)}
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
             <button
-              onClick={() =>{
+              onClick={() => {
                 setInterestResult(null)
                 setShowInterestModal(true)
               }}
@@ -257,7 +271,7 @@ export default function AdminSavings() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-          {/* Accounts list */}
+          {/* Savings accounts list */}
           <div className="card overflow-hidden">
             <div className="card-header">
               <h3 className="font-semibold text-gray-800 text-sm">
@@ -279,7 +293,9 @@ export default function AdminSavings() {
                   onClick={() => selectAccount(acc)}
                   className={`px-4 py-3 cursor-pointer transition-colors
                     hover:bg-gray-50
-                    ${selected?.id === acc.id ? 'bg-primary-50 border-l-4 border-primary-500' : ''}`}>
+                    ${selected?.id === acc.id
+                      ? 'bg-primary-50 border-l-4 border-primary-500'
+                      : ''}`}>
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm font-medium text-gray-800">
@@ -293,7 +309,8 @@ export default function AdminSavings() {
                       <p className="text-sm font-semibold text-green-700">
                         {fmt(acc.balance)}
                       </p>
-                      <span className={acc.is_active ? 'badge-success' : 'badge-danger'}>
+                      <span className={acc.is_active
+                        ? 'badge-success' : 'badge-danger'}>
                         {acc.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </div>
@@ -319,19 +336,28 @@ export default function AdminSavings() {
                         {selected.member_name}
                       </h3>
                       <p className="text-xs text-gray-500 mt-0.5">
-                        Balance: <strong className="text-green-700">
+                        Balance:{' '}
+                        <strong className="text-green-700">
                           {fmt(selected.balance)}
                         </strong>
                       </p>
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => { setShowDeposit(true); setFormErr('') }}
+                        onClick={() => {
+                          setShowDeposit(true)
+                          setFormErr('')
+                          setTxnForm(EMPTY_TXN_FORM)
+                        }}
                         className="btn-primary text-xs py-1.5">
                         Deposit
                       </button>
                       <button
-                        onClick={() => { setShowWithdraw(true); setFormErr('') }}
+                        onClick={() => {
+                          setShowWithdraw(true)
+                          setFormErr('')
+                          setTxnForm(EMPTY_TXN_FORM)
+                        }}
                         className="btn-secondary text-xs py-1.5">
                         Withdraw
                       </button>
@@ -339,7 +365,8 @@ export default function AdminSavings() {
                   </div>
                 </div>
 
-                <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+                <div className="divide-y divide-gray-100
+                                max-h-96 overflow-y-auto">
                   {txnLoading ? (
                     <div className="px-6 py-8 text-center text-gray-400 text-sm">
                       Loading transactions...
@@ -349,8 +376,8 @@ export default function AdminSavings() {
                       No transactions yet.
                     </div>
                   ) : txns.map((t) => (
-                    <div key={t.id} className="px-4 py-3 flex items-center
-                                               justify-between">
+                    <div key={t.id}
+                      className="px-4 py-3 flex items-center justify-between">
                       <div>
                         <div className="flex items-center gap-2">
                           <span className={txnBadge[t.type] || 'badge-gray'}>
@@ -364,8 +391,10 @@ export default function AdminSavings() {
                       </div>
                       <div className="text-right">
                         <p className={`text-sm font-semibold
-                          ${t.type === 'withdrawal' ? 'text-red-600' : 'text-green-700'}`}>
-                          {t.type === 'withdrawal' ? '-' : '+'}{fmt(t.amount)}
+                          ${t.type === 'withdrawal'
+                            ? 'text-red-600' : 'text-green-700'}`}>
+                          {t.type === 'withdrawal' ? '-' : '+'}
+                          {fmt(t.amount)}
                         </p>
                         <p className="text-xs text-gray-400">
                           Bal: {fmt(t.balance_after)}
@@ -446,6 +475,7 @@ export default function AdminSavings() {
               form={txnForm}
               setForm={setTxnForm}
               label="Deposit amount"
+              accounts={cashAccounts}
             />
             <ModalButtons
               onCancel={closeAll}
@@ -473,6 +503,7 @@ export default function AdminSavings() {
               form={txnForm}
               setForm={setTxnForm}
               label="Withdrawal amount"
+              accounts={cashAccounts}
             />
             <ModalButtons
               onCancel={closeAll}
@@ -483,154 +514,150 @@ export default function AdminSavings() {
         </Modal>
       )}
 
-          {/* Interest modal — confirm or show result */}
-    {showInterestModal && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center
-                      bg-black bg-opacity-40 px-4">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+      {/* Interest modal */}
+      {showInterestModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center
+                        bg-black bg-opacity-40 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
 
-          {!interestResult ? (
-            // confirmation screen
-            <>
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h3 className="font-semibold text-gray-800">
-                  Apply monthly interest
-                </h3>
-              </div>
-              <div className="px-6 py-5 space-y-4">
-                <div className="bg-yellow-50 border border-yellow-200
-                                rounded-lg px-4 py-3">
-                  <p className="text-sm text-yellow-800 font-medium">
-                    ⚠️ This will credit interest to all active savings accounts.
-                  </p>
-                  <p className="text-xs text-yellow-700 mt-1">
-                    Each account can only receive interest once per month.
-                    This action cannot be undone.
-                  </p>
+            {!interestResult ? (
+              <>
+                <div className="px-6 py-4 border-b border-gray-200">
+                  <h3 className="font-semibold text-gray-800">
+                    Apply monthly interest
+                  </h3>
                 </div>
-                <p className="text-sm text-gray-600">
-                  Active accounts: <strong>{accounts.filter(a => a.is_active).length}</strong>
-                </p>
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setShowInterestModal(false)}
-                    className="btn-secondary flex-1">
-                    Cancel
-                  </button>
-                  <button
-                    onClick={async () => {
-                      setShowInterestModal(false)
-                      await handleApplyInterest()
-                    }}
-                    disabled={interestLoad}
-                    className="btn-primary flex-1">
-                    {interestLoad ? 'Applying...' : 'Confirm & Apply'}
-                  </button>
-                </div>
-              </div>
-            </>
-          ) : (
-            // result screen
-            <>
-              <div className="px-6 py-4 border-b border-gray-200 flex
-                              items-center justify-between">
-                <h3 className="font-semibold text-gray-800">
-                  Interest application result
-                </h3>
-                <button
-                  onClick={() => {
-                    setShowInterestModal(false)
-                    setInterestResult(null)
-                  }}
-                  className="text-gray-400 hover:text-gray-600 text-xl">
-                  ✕
-                </button>
-              </div>
-              <div className="px-6 py-5 space-y-4 max-h-96 overflow-y-auto">
-
-                {/* Status banner */}
-                {interestResult.status === 'already_applied' ? (
+                <div className="px-6 py-5 space-y-4">
                   <div className="bg-yellow-50 border border-yellow-200
                                   rounded-lg px-4 py-3">
                     <p className="text-sm text-yellow-800 font-medium">
-                      ⚠️ Already applied this month
+                      ⚠️ This will credit interest to all active savings accounts.
                     </p>
                     <p className="text-xs text-yellow-700 mt-1">
-                      Interest has already been credited to all accounts
-                      this month.
+                      Each account can only receive interest once per month.
+                      This action cannot be undone.
                     </p>
                   </div>
-                ) : (
-                  <div className="bg-green-50 border border-green-200
-                                  rounded-lg px-4 py-3">
-                    <p className="text-sm text-green-800 font-medium">
-                      ✓ {interestResult.message}
-                    </p>
+                  <p className="text-sm text-gray-600">
+                    Active accounts:{' '}
+                    <strong>
+                      {savingsAccounts.filter(a => a.is_active).length}
+                    </strong>
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowInterestModal(false)}
+                      className="btn-secondary flex-1">
+                      Cancel
+                    </button>
+                    <button
+                      onClick={async () => {
+                        setShowInterestModal(false)
+                        await handleApplyInterest()
+                      }}
+                      disabled={interestLoad}
+                      className="btn-primary flex-1">
+                      {interestLoad ? 'Applying...' : 'Confirm & Apply'}
+                    </button>
                   </div>
-                )}
-
-                {/* Applied accounts */}
-                {interestResult.applied?.length > 0 && (
-                  <div>
-                    <p className="text-xs font-semibold text-gray-500
-                                  uppercase tracking-wide mb-2">
-                      Interest credited
-                    </p>
-                    <div className="space-y-1">
-                      {interestResult.applied.map((a, i) => (
-                        <div key={i}
-                          className="flex justify-between text-sm
-                                    py-1.5 border-b border-gray-100">
-                          <span className="text-gray-700">{a.member}</span>
-                          <span className="text-green-600 font-medium">
-                            +Rs. {a.interest}
-                          </span>
-                        </div>
-                      ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="px-6 py-4 border-b border-gray-200 flex
+                                items-center justify-between">
+                  <h3 className="font-semibold text-gray-800">
+                    Interest application result
+                  </h3>
+                  <button
+                    onClick={() => {
+                      setShowInterestModal(false)
+                      setInterestResult(null)
+                    }}
+                    className="text-gray-400 hover:text-gray-600 text-xl">
+                    ✕
+                  </button>
+                </div>
+                <div className="px-6 py-5 space-y-4 max-h-96 overflow-y-auto">
+                  {interestResult.status === 'already_applied' ? (
+                    <div className="bg-yellow-50 border border-yellow-200
+                                    rounded-lg px-4 py-3">
+                      <p className="text-sm text-yellow-800 font-medium">
+                        ⚠️ Already applied this month
+                      </p>
+                      <p className="text-xs text-yellow-700 mt-1">
+                        Interest has already been credited to all accounts
+                        this month.
+                      </p>
                     </div>
-                  </div>
-                )}
-
-                {/* Already done */}
-                {interestResult.already_done?.length > 0 && (
-                  <div>
-                    <p className="text-xs font-semibold text-gray-500
-                                  uppercase tracking-wide mb-2">
-                      Already applied this month
-                    </p>
-                    <div className="space-y-1">
-                      {interestResult.already_done.map((name, i) => (
-                        <p key={i} className="text-sm text-gray-500 py-1">
-                          {name}
-                        </p>
-                      ))}
+                  ) : (
+                    <div className="bg-green-50 border border-green-200
+                                    rounded-lg px-4 py-3">
+                      <p className="text-sm text-green-800 font-medium">
+                        ✓ {interestResult.message}
+                      </p>
                     </div>
-                  </div>
-                )}
+                  )}
 
-              </div>
-              <div className="px-6 py-4 border-t border-gray-100">
-                <button
-                  onClick={() => {
-                    setShowInterestModal(false)
-                    setInterestResult(null)
-                  }}
-                  className="btn-primary w-full">
-                  Done
-                </button>
-              </div>
-            </>
-          )}
+                  {interestResult.applied?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500
+                                    uppercase tracking-wide mb-2">
+                        Interest credited
+                      </p>
+                      <div className="space-y-1">
+                        {interestResult.applied.map((a, i) => (
+                          <div key={i}
+                            className="flex justify-between text-sm
+                                       py-1.5 border-b border-gray-100">
+                            <span className="text-gray-700">{a.member}</span>
+                            <span className="text-green-600 font-medium">
+                              +Rs. {a.interest}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
+                  {interestResult.already_done?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500
+                                    uppercase tracking-wide mb-2">
+                        Already applied this month
+                      </p>
+                      <div className="space-y-1">
+                        {interestResult.already_done.map((name, i) => (
+                          <p key={i} className="text-sm text-gray-500 py-1">
+                            {name}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="px-6 py-4 border-t border-gray-100">
+                  <button
+                    onClick={() => {
+                      setShowInterestModal(false)
+                      setInterestResult(null)
+                    }}
+                    className="btn-primary w-full">
+                    Done
+                  </button>
+                </div>
+              </>
+            )}
+
+          </div>
         </div>
-      </div>
-    )}
+      )}
 
-  </AdminLayout>
+    </AdminLayout>
   )
 }
 
-// ── small reusable pieces ─────────────────────────────────────────────────────
+// ── Reusable components ───────────────────────────────────────────────────────
 
 function Modal({ title, onClose, children }) {
   return (
@@ -661,7 +688,7 @@ function ErrorBox({ msg }) {
   )
 }
 
-function AmountNoteFields({ form, setForm, label }) {
+function AmountNoteFields({ form, setForm, label, accounts = [] }) {
   return (
     <>
       <div>
@@ -682,12 +709,43 @@ function AmountNoteFields({ form, setForm, label }) {
       </div>
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
+          Account <span className="text-red-500">*</span>
+        </label>
+        <select
+          className="input-field"
+          value={form.account_id}
+          onChange={(e) => setForm({ ...form, account_id: e.target.value })}
+          required>
+          <option value="">Select account...</option>
+          {accounts.map(a => (
+            <option key={a.id} value={a.id}>
+              {a.name} — Rs.{' '}
+              {parseFloat(a.balance).toLocaleString('en-NP')}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Date (BS) <span className="text-red-500">*</span>
+        </label>
+        <input
+          type="text"
+          className="input-field font-mono"
+          placeholder="2082-02-11"
+          value={form.nepali_date}
+          onChange={(e) => setForm({ ...form, nepali_date: e.target.value })}
+          required
+        />
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
           Note (optional)
         </label>
         <input
           type="text"
           className="input-field"
-          placeholder="Purpose of withdraw"
+          placeholder="e.g. Monthly deposit"
           value={form.note}
           onChange={(e) => setForm({ ...form, note: e.target.value })}
         />

@@ -50,4 +50,16 @@ urlpatterns = [
         views.AdminIncomeView.as_view()),
     path('income/<uuid:income_id>/',
         views.AdminIncomeDetailView.as_view()),
+    
+    # ------------Accounts----------------------
+     path('accounts/',
+          views.AdminAccountListCreateView.as_view()),
+     path('accounts/transfer/',
+          views.AdminAccountTransferView.as_view()),
+     path('accounts/<uuid:account_id>/',
+          views.AdminAccountDetailView.as_view()),
+     path('accounts/<uuid:account_id>/transactions/',
+          views.AdminAccountTransactionListView.as_view()),
+     path('accounts/<uuid:account_id>/adjust/',
+          views.AdminAccountAdjustView.as_view()),
 ]
