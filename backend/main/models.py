@@ -347,3 +347,59 @@ class AccountTransaction(models.Model):
 
     def __str__(self):
         return f'{self.transaction_type} Rs.{self.amount} — {self.account.name}'
+    
+class TrialBalance(models.Model):
+    PERIOD_TYPES = [
+        ('monthly', 'Monthly'),
+        ('annual',  'Annual'),
+    ]
+
+    id                = models.UUIDField(
+                            primary_key=True,
+                            default=uuid.uuid4,
+                            editable=False
+                        )
+    period_type       = models.CharField(max_length=10, choices=PERIOD_TYPES)
+    bs_year           = models.IntegerField()
+    bs_month          = models.IntegerField(null=True, blank=True)
+    bs_month_name     = models.CharField(max_length=20, blank=True)
+    fiscal_year       = models.CharField(max_length=10)
+    start_date_ad     = models.DateField()
+    end_date_ad       = models.DateField()
+    generated_at      = models.DateTimeField(auto_now_add=True)
+    generated_by      = models.ForeignKey(
+                            settings.AUTH_USER_MODEL,
+                            on_delete=models.SET_NULL,
+                            null=True, blank=True,
+                            related_name='generated_statements'
+                        )
+    is_auto_generated = models.BooleanField(default=False)
+
+    class Meta:
+        ordering        = ['-bs_year', '-bs_month']
+        unique_together = [['period_type', 'bs_year', 'bs_month']]
+
+    def __str__(self):
+        if self.period_type == 'monthly':
+            return f'Trial Balance {self.bs_month_name} {self.bs_year}'
+        return f'Annual Trial Balance FY {self.fiscal_year}'
+
+class CooperativeSettings(models.Model):
+    """Stores cooperative-wide settings like opening equity."""
+    opening_equity     = models.DecimalField(
+                             max_digits=14, decimal_places=2, default=0
+                         )
+    opening_equity_set = models.BooleanField(default=False)
+    updated_at         = models.DateTimeField(auto_now=True)
+    updated_by         = models.ForeignKey(
+                             settings.AUTH_USER_MODEL,
+                             on_delete=models.SET_NULL,
+                             null=True, blank=True,
+                             related_name='settings_updates'
+                         )
+
+    class Meta:
+        verbose_name = 'Cooperative Settings'
+
+    def __str__(self):
+        return f'Settings (Opening Equity: Rs. {self.opening_equity})'

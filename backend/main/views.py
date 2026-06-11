@@ -11,18 +11,25 @@ from accounts.permissions import IsAdmin, IsMember
 from .models import (
     SavingsAccount, SavingsTransaction, Loan, LoanRepayment, 
     Expenditure, ExpenditureCategory, Income, IncomeCategory, Account, AccountTransaction,
+    TrialBalance, CooperativeSettings,
 )
 from .serializers import (
     SavingsAccountSerializer, SavingsTransactionSerializer, 
     DepositWithdrawSerializer, LoanSerializer, LoanRepaymentSerializer,
     RepaymentInputSerializer, ExpenditureSerializer,
     ExpenditureCategorySerializer, IncomeSerializer, IncomeCategorySerializer, 
-    AccountSerializer, AccountTransactionSerializer,
+    AccountSerializer, AccountTransactionSerializer, 
+    TrialBalanceSerializer, CooperativeSettingsSerializer,
 )
 
 from .services import (
     deposit_to_savings, withdraw_from_savings, apply_interest_to_account, disburse_loan, record_loan_repayment,
-    generate_loan_schedule, credit_account, debit_account, transfer_between_accounts,
+    generate_loan_schedule, credit_account, debit_account, transfer_between_accounts, 
+    get_statement_data, create_trial_balance_record, create_annual_trial_balance_record,
+)
+
+from .bs_calendar import (
+    get_bs_month_name, today_bs, get_fiscal_year, BS_MONTHS,
 )
 
 User = get_user_model()
@@ -884,4 +891,121 @@ class AdminAccountTransferView(APIView):
                 'to_account':   AccountSerializer(to_account).data,
             })
         except ValueError as e:
+            return Response({'error': str(e)}, status=400)
+        
+class AdminTrialBalanceListView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        period_type = request.query_params.get('type', 'monthly')
+        statements  = TrialBalance.objects.filter(period_type=period_type)
+
+        # return lightweight list — no live calculation here
+        data = []
+        for tb in statements:
+            data.append({
+                'id':               str(tb.id),
+                'period_type':      tb.period_type,
+                'bs_year':          tb.bs_year,
+                'bs_month':         tb.bs_month,
+                'bs_month_name':    tb.bs_month_name,
+                'fiscal_year':      tb.fiscal_year,
+                'start_date_ad':    str(tb.start_date_ad),
+                'end_date_ad':      str(tb.end_date_ad),
+                'generated_at':     tb.generated_at.isoformat(),
+                'is_auto_generated': tb.is_auto_generated,
+            })
+
+        return Response(data)
+
+
+class AdminTrialBalanceGenerateView(APIView):
+    permission_classes = [IsAdmin]
+
+    def post(self, request):
+        period_type = request.data.get('period_type', 'monthly')
+        force       = bool(request.data.get('force', False))
+
+        if period_type == 'monthly':
+            bs_year  = request.data.get('bs_year')
+            bs_month = request.data.get('bs_month')
+
+            if not bs_year or not bs_month:
+                return Response(
+                    {'error': 'bs_year and bs_month are required.'},
+                    status=400
+                )
+
+            try:
+                tb, created = create_trial_balance_record(
+                    bs_year      = int(bs_year),
+                    bs_month     = int(bs_month),
+                    generated_by = request.user,
+                    force        = force,
+                )
+                # return live calculated data
+                return Response({
+                    'created':   created,
+                    'statement': get_statement_data(tb),
+                }, status=201 if created else 200)
+            except Exception as e:
+                return Response({'error': str(e)}, status=400)
+
+        elif period_type == 'annual':
+            fiscal_year = request.data.get('fiscal_year')
+            if not fiscal_year:
+                return Response(
+                    {'error': 'fiscal_year is required (e.g. 2081/82).'},
+                    status=400
+                )
+            try:
+                tb, created = create_annual_trial_balance_record(
+                    fiscal_year_str = fiscal_year,
+                    generated_by    = request.user,
+                    force           = force,
+                )
+                return Response({
+                    'created':   created,
+                    'statement': get_statement_data(tb),
+                }, status=201 if created else 200)
+            except Exception as e:
+                return Response({'error': str(e)}, status=400)
+
+        return Response({'error': 'Invalid period_type.'}, status=400)
+
+
+class AdminTrialBalanceDetailView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request, tb_id):
+        tb = get_object_or_404(TrialBalance, id=tb_id)
+        # always return live calculated data
+        return Response(get_statement_data(tb))
+
+    def delete(self, request, tb_id):
+        tb = get_object_or_404(TrialBalance, id=tb_id)
+        tb.delete()
+        return Response({'message': 'Statement deleted.'}, status=204)
+class AdminCooperativeSettingsView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        obj, _ = CooperativeSettings.objects.get_or_create(pk=1)
+        return Response(CooperativeSettingsSerializer(obj).data)
+
+    def patch(self, request):
+        obj, _ = CooperativeSettings.objects.get_or_create(pk=1)
+        opening_equity = request.data.get('opening_equity')
+        if opening_equity is None:
+            return Response(
+                {'error': 'opening_equity is required.'},
+                status=400
+            )
+        try:
+            obj.opening_equity     = Decimal(str(opening_equity))
+            obj.opening_equity_set = True
+            obj.updated_by         = request.user
+            obj.save()
+            return Response(CooperativeSettingsSerializer(obj).data)
+        except Exception as e:
             return Response({'error': str(e)}, status=400)

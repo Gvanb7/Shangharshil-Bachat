@@ -2,7 +2,8 @@ from rest_framework import serializers
 from decimal import Decimal
 from .models import(
     SavingsAccount, SavingsTransaction, Loan, LoanRepayment, Expenditure,
-    ExpenditureCategory, Income, IncomeCategory, MemberDocument, Account, AccountTransaction
+    ExpenditureCategory, Income, IncomeCategory, MemberDocument, Account, AccountTransaction,
+    TrialBalance, CooperativeSettings,
 )
 from .services import calculate_loan_summary
 
@@ -253,3 +254,26 @@ class AccountTransactionSerializer(serializers.ModelSerializer):
             'created_by_name', 'created_at',
         ]
         read_only_fields = ['id', 'created_at']
+        
+class TrialBalanceSerializer(serializers.ModelSerializer):
+    generated_by_name = serializers.CharField(
+        source='generated_by.full_name', read_only=True
+    )
+
+    class Meta:
+        model  = TrialBalance
+        fields = [
+            'id', 'period_type', 'bs_year', 'bs_month', 'bs_month_name',
+            'fiscal_year', 'start_date_ad', 'end_date_ad',
+            'generated_at', 'generated_by_name', 'is_auto_generated',
+            'opening_equity', 'total_assets', 'total_liabilities',
+            'total_income', 'total_expenses', 'net_surplus',
+            'closing_equity', 'is_balanced', 'line_items',
+        ]
+        read_only_fields = fields
+
+
+class CooperativeSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = CooperativeSettings
+        fields = ['opening_equity', 'opening_equity_set', 'updated_at']

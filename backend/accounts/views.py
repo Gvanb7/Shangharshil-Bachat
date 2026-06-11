@@ -109,12 +109,22 @@ class CompleteProfileView(APIView):
 
 
 class MeView(APIView):
-    """Returns current logged-in user's profile."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response(UserProfileSerializer(request.user).data)
+        if request.user.role == 'admin':
+            try:
+                from main.bs_calendar import is_last_day_of_bs_month, today_bs
+                from main.services import create_trial_balance_record
+                if is_last_day_of_bs_month():
+                    y, m, _ = today_bs()
+                    create_trial_balance_record(
+                        bs_year=y, bs_month=m, is_auto=True
+                    )
+            except Exception:
+                pass  # never block login
 
+        return Response(UserProfileSerializer(request.user).data)
 
 class AdminRegisterMemberView(APIView):
     permission_classes = [IsAdmin]

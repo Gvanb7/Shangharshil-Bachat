@@ -62,4 +62,16 @@ urlpatterns = [
           views.AdminAccountTransactionListView.as_view()),
      path('accounts/<uuid:account_id>/adjust/',
           views.AdminAccountAdjustView.as_view()),
+     
+     # ----------Trial Balance / Statements----------
+     path('statements/',
+          views.AdminTrialBalanceListView.as_view()),
+     path('statements/generate/',
+          views.AdminTrialBalanceGenerateView.as_view()),
+     path('statements/<uuid:tb_id>/',
+          views.AdminTrialBalanceDetailView.as_view()),
+
+     # Cooperative settings
+     path('settings/',
+          views.AdminCooperativeSettingsView.as_view()),
 ]

@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { path: '/admin/loans',       label: 'Loans',       icon: '📋' },
   { path: '/admin/expenditure', label: 'Expenditure', icon: '📊' },
   { path: '/admin/income',      label:  'Income',     icon: '📈' },
+  { path: '/admin/statements', label: 'Statements', icon: '📄' },
 ]
 
 export default function AdminLayout({ children }) {
