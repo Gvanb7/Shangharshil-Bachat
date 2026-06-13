@@ -23,11 +23,16 @@ export default function LoginPage() {
         password: password,
       })
       
-      const { tokens, role, user } = res.data
-      setAuth(user, tokens.access, tokens.refresh)
-      navigate(role === 'admin' ? '/admin' : '/member', { replace: true })
+      const { tokens, role, user, must_change_password } = res.data
+      setAuth(user, tokens.access, tokens.refresh, must_change_password)
+
+      if (must_change_password && role === 'member') {
+        navigate('/change-password', { replace: true })
+      } else {
+        navigate(role === 'admin' ? '/admin' : '/member', { replace: true })
+      }
     } catch (err) {
-      setError(err.response?.data?.error || 'Invalid credentials. Please try again.')
+      setError(err.response?.data?.error || 'Something went wrong. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -219,6 +224,15 @@ export default function LoginPage() {
                 <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 
                                 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
               </button>
+
+              <div className="text-center">
+                <button
+                  type="button"
+                  onClick={() => navigate('/forgot-password')}
+                  className="text-sm text-primary-600 hover:text-primary-700">
+                  Forgot password?
+                </button>
+              </div>
             </form>
 
             {/* Security Badge */}
@@ -247,7 +261,7 @@ export default function LoginPage() {
       </div>
 
       {/* Animations */}
-      <style jsx>{`
+      <style>{`
         @keyframes fade-in-down {
           from {
             opacity: 0;

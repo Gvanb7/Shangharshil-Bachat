@@ -9,6 +9,9 @@ urlpatterns = [
     path('auth/change-password/', views.MemberChangePasswordView.as_view()),
     path('auth/profile-picture/', views.UpdateProfilePictureView.as_view()),
     path('auth/profile-picture/delete/', views.DeleteProfilePictureView.as_view()),
+    path('auth/forgot-password/',       views.ForgotPasswordView.as_view()),
+    path('auth/reset-password/',        views.ResetPasswordView.as_view()),
+    path('auth/validate-reset-token/',  views.ValidateResetTokenView.as_view()),
 
     # Admin only
     path('admin/members/',           views.AdminListMembersView.as_view()),

@@ -1,5 +1,6 @@
 import os
 from django.contrib.auth import get_user_model
+from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -23,7 +24,14 @@ from django_ratelimit.decorators import ratelimit
 from django.utils.decorators import method_decorator
 
 from rest_framework.parsers import MultiPartParser, FormParser
-from .email_service import send_welcome_email, send_password_reset_email
+from .email_service import send_welcome_email, send_password_reset_email, send_password_reset_link_email
+
+import secrets
+from django.utils import timezone
+from datetime import timedelta
+from .models import PasswordResetToken
+from django.conf import settings
+
 
 User = get_user_model()
 
@@ -202,6 +210,7 @@ class AdminRegisterMemberView(APIView):
             phone=phone,
             address=address,
             is_active=True,
+            must_change_password=True,  # force password change on first login
         )
 
         # save documents
@@ -311,6 +320,7 @@ class MemberLoginView(APIView):
             'tokens': tokens,
             'role':   user.role,
             'user':   UserProfileSerializer(user).data,
+            'must_change_password': user.must_change_password,
         })
 
 
@@ -415,6 +425,7 @@ class MemberChangePasswordView(APIView):
             )
 
         request.user.set_password(new_password)
+        request.user.must_change_password = False
         request.user.save()
         return Response({'message': 'Password changed successfully.'})
 
@@ -520,3 +531,146 @@ class DeleteProfilePictureView(APIView):
         user.profile_photo = None
         user.save()
         return Response({'message': 'Profile picture removed.'})
+    
+class ForgotPasswordView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email', '').strip().lower()
+
+        if not email:
+            return Response(
+                {'error': 'Email is required.'},
+                status=400
+            )
+
+        # always return success to prevent email enumeration
+        try:
+            user = User.objects.get(
+                email__iexact=email,
+                role='member',
+                is_active=True
+            )
+
+            # invalidate existing tokens
+            PasswordResetToken.objects.filter(
+                user=user, is_used=False
+            ).update(is_used=True)
+
+            # create new token
+            token      = secrets.token_urlsafe(32)
+            expires_at = timezone.now() + timedelta(minutes=15)
+
+            reset_token = PasswordResetToken.objects.create(
+                user=user,
+                token=token,
+                expires_at=expires_at,
+            )
+
+            # send email
+            reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+            send_password_reset_link_email(
+                member_email = user.email,
+                member_name  = user.full_name or user.email,
+                reset_url    = reset_url,
+                expires_mins = 15,
+            )
+
+        except User.DoesNotExist:
+            pass   # don't reveal if email exists
+
+        return Response({
+            'message': 'If that email is registered, a reset link has been sent.'
+        })
+
+
+class ResetPasswordView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        token            = request.data.get('token', '').strip()
+        new_password     = request.data.get('new_password', '').strip()
+        confirm_password = request.data.get('confirm_password', '').strip()
+
+        if not token:
+            return Response(
+                {'error': 'Reset token is required.'},
+                status=400
+            )
+
+        if not new_password or not confirm_password:
+            return Response(
+                {'error': 'Both password fields are required.'},
+                status=400
+            )
+
+        if new_password != confirm_password:
+            return Response(
+                {'error': 'Passwords do not match.'},
+                status=400
+            )
+
+        if len(new_password) < 8:
+            return Response(
+                {'error': 'Password must be at least 8 characters.'},
+                status=400
+            )
+
+        try:
+            reset_token = PasswordResetToken.objects.select_related(
+                'user'
+            ).get(token=token, is_used=False)
+        except PasswordResetToken.DoesNotExist:
+            return Response(
+                {'error': 'Invalid or expired reset link.'},
+                status=400
+            )
+
+        if reset_token.is_expired:
+            return Response(
+                {'error': 'This reset link has expired. Please request a new one.'},
+                status=400
+            )
+
+        # reset password
+        user = reset_token.user
+        user.set_password(new_password)
+        user.must_change_password = False
+        user.save()
+
+        # mark token as used
+        reset_token.is_used = True
+        reset_token.save()
+
+        # invalidate all other tokens for this user
+        PasswordResetToken.objects.filter(
+            user=user, is_used=False
+        ).update(is_used=True)
+
+        return Response({
+            'message': 'Password reset successfully. You can now log in.'
+        })
+
+
+class ValidateResetTokenView(APIView):
+    """Check if a reset token is still valid before showing the form."""
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        token = request.query_params.get('token', '').strip()
+
+        if not token:
+            return Response({'valid': False})
+
+        try:
+            reset_token = PasswordResetToken.objects.get(
+                token=token, is_used=False
+            )
+            if reset_token.is_expired:
+                return Response({'valid': False, 'reason': 'expired'})
+            return Response({
+                'valid': True,
+                'email': reset_token.user.email,
+            })
+        except PasswordResetToken.DoesNotExist:
+            return Response({'valid': False, 'reason': 'invalid'})

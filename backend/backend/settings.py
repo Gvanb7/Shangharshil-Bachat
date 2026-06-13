@@ -214,3 +214,5 @@ AUTH_USER_MODEL = 'accounts.User'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')

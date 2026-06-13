@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { ProtectedRoute, AdminRoute, MemberRoute, GuestRoute } from './components/ProtectedRoute'
+import { ProtectedRoute, AdminRoute, GuestRoute } from './components/ProtectedRoute'
 import useAuthStore from './store/authStore'
 
 import LoginPage        from './pages/loginPage'
@@ -12,11 +12,29 @@ import MemberDashboard  from './pages/member/MemberDashboard'
 import AdminIncome      from './pages/admin/AdminIncome'
 import AdminAccounts from './pages/admin/AdminAccounts'
 import AdminStatements from './pages/admin/AdminStatements'
+import ChangePasswordPage  from './pages/ChangePasswordPage'
+import ForgotPasswordPage  from './pages/ForgotPasswordPage'
+import ResetPasswordPage   from './pages/ResetPasswordPage'
 
 function RootRedirect() {
   const { isAuth, user } = useAuthStore()
   if (!isAuth) return <Navigate to="/login" replace />
   return <Navigate to={user?.role === 'admin' ? '/admin' : '/member'} replace />
+}
+
+function MustChangePasswordRoute({ children }) {
+  const { isAuth, mustChangePassword } = useAuthStore()
+  if (!isAuth) return <Navigate to="/login" replace />
+  if (!mustChangePassword) return <Navigate to="/member" replace />
+  return children
+}
+
+function MemberRoute({ children }) {
+  const { isAuth, user, mustChangePassword } = useAuthStore()
+  if (!isAuth) return <Navigate to="/login" replace />
+  if (user?.role === 'admin') return <Navigate to="/admin" replace />
+  if (mustChangePassword) return <Navigate to="/change-password" replace />
+  return children
 }
 
 export default function App() {
@@ -58,6 +76,20 @@ export default function App() {
         {/* Member routes */}
         <Route path="/member" element={
           <MemberRoute><MemberDashboard /></MemberRoute>
+        } />
+
+        <Route path="/change-password" element={
+          <MustChangePasswordRoute>
+            <ChangePasswordPage />
+          </MustChangePasswordRoute>
+        } />
+
+        <Route path="/forgot-password" element={
+          <GuestRoute><ForgotPasswordPage /></GuestRoute>
+        } />
+
+        <Route path="/reset-password" element={
+          <GuestRoute><ResetPasswordPage /></GuestRoute>
         } />
 
         {/* Catch all */}

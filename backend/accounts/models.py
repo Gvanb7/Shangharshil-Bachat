@@ -1,6 +1,8 @@
 from django.db import models
 import uuid
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin, Group, Permission
+import secrets
+from django.conf import settings
 
 # Create your models here.
 class UserManager(BaseUserManager):
@@ -40,6 +42,7 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     is_active    = models.BooleanField(default=False)   # False until OTP verified
     is_staff     = models.BooleanField(default=False)
+    must_change_password = models.BooleanField(default=False)
     
     groups = models.ManyToManyField(
         Group,
@@ -81,3 +84,26 @@ class OTPRequest(models.Model):
 
     def __str__(self):
         return f'OTP for {self.email}'
+
+class PasswordResetToken(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+                settings.AUTH_USER_MODEL, 
+                on_delete = models.CASCADE,
+                related_name = 'reset_tokens'
+            )
+    token = models.CharField(max_length = 64, unique=True)
+    created_at = models.DateField(auto_now_add = True)
+    expires_at = models.DateField()
+    is_used    = models.BooleanField(default = False)
+    
+    class Meta:
+        ordering = ['-created_at']
+        
+    def __str__(self):
+        return f'Reset token for {self.user.email}'
+    
+    @property
+    def is_expired(self):
+        from django.utils import timezone
+        return timezone.now() > self.expires_at
