@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import AdminLayout from '../../components/AdminLayout'
 import api from '../../lib/api'
 import { toBS } from '../../lib/nepaliDate'
+import BSDatePicker from '../../components/BSDatePicker'
 import useAccounts from '../../hooks/useAccounts'
 
 const EMPTY_FORM = {
@@ -426,12 +427,12 @@ export default function AdminExpenditure() {
       </div>
 
       {/* Add / Edit expenditure modal */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center
-                        bg-black bg-opacity-40 px-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="px-6 py-4 border-b border-gray-200 flex
-                            items-center justify-between">
+        {showForm && (
+          <div className="fixed inset-0 z-50 bg-black/40 overflow-y-auto">
+            <div className="min-h-screen flex justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-8">
+                <div className="px-6 py-4 border-b border-gray-200 flex
+                                items-center justify-between">
               <h3 className="font-semibold text-gray-800">
                 {editItem ? 'Edit expenditure' : 'Record expenditure'}
               </h3>
@@ -500,22 +501,19 @@ export default function AdminExpenditure() {
                   <option value="">Select account...</option>
                   {accounts.map(a => (
                     <option key={a.id} value={a.id}>
-                      {a.name} (Rs. {parseFloat(a.balance).toLocaleString('en-NP')})
+                      {a.name} ({a.account_type_display})
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Date (BS) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  className="input-field font-mono"
-                  placeholder="2082-02-11"
+              <div className="relative z-50 overflow-visible">
+                <BSDatePicker
+                  label="Date (BS)"
                   value={form.nepali_date}
-                  onChange={(e) => setForm({ ...form, nepali_date: e.target.value })}
+                  onChange={(val) =>
+                    setForm({ ...form, nepali_date: val })
+                  }
                   required
                 />
               </div>
@@ -530,19 +528,6 @@ export default function AdminExpenditure() {
                   placeholder="Describe the expenditure..."
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Date <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="date"
-                  className="input-field"
-                  value={form.expense_date}
-                  onChange={(e) => setForm({ ...form, expense_date: e.target.value })}
                   required
                 />
               </div>
@@ -565,6 +550,7 @@ export default function AdminExpenditure() {
               </div>
             </form>
           </div>
+        </div>
         </div>
       )}
 

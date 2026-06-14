@@ -3,6 +3,7 @@ import AdminLayout from '../../components/AdminLayout'
 import api from '../../lib/api'
 import NepaliDatePicker from '../../components/NepaliDatePicker'
 import { toBS, formatBS } from '../../lib/nepaliDate'
+import BSDatePicker from '../../components/BSDatePicker'
 import useAccounts from '../../hooks/useAccounts'
 
 const EMPTY_LOAN_FORM = {
@@ -638,7 +639,7 @@ export default function AdminLoans() {
                 <option value="">Select account...</option>
                 {accounts.map(a => (
                   <option key={a.id} value={a.id}>
-                    {a.name} (Rs. {parseFloat(a.balance).toLocaleString('en-NP')})
+                    {a.name} ({a.account_type_display})
                   </option>
                 ))}
               </select>
@@ -648,13 +649,11 @@ export default function AdminLoans() {
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Disbursement date (BS) <span className="text-red-500">*</span>
               </label>
-              <input
-                type="text"
-                className="input-field font-mono"
-                placeholder="2082-02-11"
+              <BSDatePicker
+                label="Disbursement date (BS)"
                 value={disburseForm.nepali_date}
-                onChange={(e) => setDisburseForm({
-                  ...disburseForm, nepali_date: e.target.value
+                onChange={(val) => setDisburseForm({
+                  ...disburseForm, nepali_date: val
                 })}
                 required
               />
@@ -1053,9 +1052,9 @@ function PayNowModal({ month, loan, fmt, onClose, onSuccess, accounts }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center
-                    bg-black bg-opacity-40 px-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+    <div className="fixed inset-0 z-50 bg-black/40 overflow-y-auto">
+      <div className="min-h-screen flex justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-8">
         <div className="px-6 py-4 border-b border-gray-200 flex
                         items-center justify-between">
           <div>
@@ -1121,17 +1120,11 @@ function PayNowModal({ month, loan, fmt, onClose, onSuccess, accounts }) {
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Payment date (BS) <span className="text-red-500">*</span>
             </label>
-            <input
-              type="text"
-              className="input-field font-mono"
-              placeholder="2082-02-11"
+            <BSDatePicker
               value={nepaliDate}
-              onChange={(e) => setNepaliDate(e.target.value)}
+              onChange={(val) => setNepaliDate(val)}
               required
             />
-            <p className="text-xs text-gray-400 mt-1">
-              Enter BS date in YYYY-MM-DD format
-            </p>
           </div>
 
           <div>
@@ -1156,6 +1149,7 @@ function PayNowModal({ month, loan, fmt, onClose, onSuccess, accounts }) {
           </div>
         </form>
       </div>
+    </div>
     </div>
   )
 }

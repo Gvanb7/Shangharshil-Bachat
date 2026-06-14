@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import AdminLayout from '../../components/AdminLayout'
 import api from '../../lib/api'
 import { toBS, formatBS } from '../../lib/nepaliDate'
+import BSDatePicker from '../../components/BSDatePicker'
 
 const ACCOUNT_TYPES = [
   { value: 'cash',    label: 'Cash'           },
@@ -614,11 +615,12 @@ export default function AdminAccounts() {
 
       {/* Adjust balance modal */}
       {showAdjust && selected && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center
-                        bg-black bg-opacity-40 px-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="px-6 py-4 border-b border-gray-200 flex
-                            items-center justify-between">
+         <div className="fixed inset-0 z-50 bg-black/40 overflow-y-auto">
+          <div className="min-h-screen flex justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-8">
+
+              <div className="px-6 py-4 border-b border-gray-200 flex
+                              items-center justify-between">
               <h3 className="font-semibold text-gray-800">
                 Adjust balance — {selected.name}
               </h3>
@@ -693,14 +695,14 @@ export default function AdminAccounts() {
                                   text-gray-700 mb-1">
                   Date (BS) <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="text"
-                  className="input-field font-mono"
-                  placeholder="2082-02-11"
+                <BSDatePicker
                   value={adjForm.nepali_date}
-                  onChange={(e) => setAdjForm({
-                    ...adjForm, nepali_date: e.target.value
-                  })}
+                  onChange={(val) =>
+                    setAdjForm({
+                      ...adjForm,
+                      nepali_date: val,
+                    })
+                  }
                   required
                 />
               </div>
@@ -748,15 +750,17 @@ export default function AdminAccounts() {
             </form>
           </div>
         </div>
+        </div>
       )}
 
       {/* Transfer modal */}
       {showTransfer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center
-                        bg-black bg-opacity-40 px-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="px-6 py-4 border-b border-gray-200 flex
-                            items-center justify-between">
+         <div className="fixed inset-0 z-50 bg-black/40 overflow-y-auto">
+          <div className="min-h-screen flex justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-8">
+
+              <div className="px-6 py-4 border-b border-gray-200 flex
+                              items-center justify-between">
               <h3 className="font-semibold text-gray-800">
                 Transfer between accounts
               </h3>
@@ -789,7 +793,7 @@ export default function AdminAccounts() {
                   <option value="">Select account...</option>
                   {accounts.map(a => (
                     <option key={a.id} value={a.id}>
-                      {a.name} ({fmt(a.balance)})
+                      {a.name} ({a.account_type_display})
                     </option>
                   ))}
                 </select>
@@ -812,7 +816,7 @@ export default function AdminAccounts() {
                     .filter(a => a.id !== transferForm.from_account)
                     .map(a => (
                       <option key={a.id} value={a.id}>
-                        {a.name} ({fmt(a.balance)})
+                        {a.name} ({a.account_type_display})
                       </option>
                     ))}
                 </select>
@@ -842,16 +846,16 @@ export default function AdminAccounts() {
                                   text-gray-700 mb-1">
                   Date (BS) <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="text"
-                  className="input-field font-mono"
-                  placeholder="2082-02-11"
-                  value={transferForm.nepali_date}
-                  onChange={(e) => setTransferForm({
-                    ...transferForm, nepali_date: e.target.value
-                  })}
-                  required
-                />
+                 <BSDatePicker
+                    value={transferForm.nepali_date}
+                    onChange={(val) =>
+                      setTransferForm({
+                        ...transferForm,
+                        nepali_date: val,
+                      })
+                    }
+                    required
+                  />
               </div>
 
               <div>
@@ -886,6 +890,7 @@ export default function AdminAccounts() {
               </div>
             </form>
           </div>
+        </div>
         </div>
       )}
 

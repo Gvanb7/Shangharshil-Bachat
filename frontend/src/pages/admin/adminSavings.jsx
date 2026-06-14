@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import AdminLayout from '../../components/AdminLayout'
 import api from '../../lib/api'
 import { toBS } from '../../lib/nepaliDate'
+import BSDatePicker from '../../components/BSDatePicker'
 import useAccounts from '../../hooks/useAccounts'
 
 const EMPTY_ACCOUNT_FORM = { member_id: '', interest_rate: '6.00' }
@@ -516,10 +517,9 @@ export default function AdminSavings() {
 
       {/* Interest modal */}
       {showInterestModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center
-                        bg-black bg-opacity-40 px-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-
+        <div className="fixed inset-0 z-50 bg-black/40 overflow-y-auto">
+          <div className="min-h-screen flex justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-8">
             {!interestResult ? (
               <>
                 <div className="px-6 py-4 border-b border-gray-200">
@@ -651,6 +651,7 @@ export default function AdminSavings() {
 
           </div>
         </div>
+        </div>
       )}
 
     </AdminLayout>
@@ -661,11 +662,13 @@ export default function AdminSavings() {
 
 function Modal({ title, onClose, children }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center
-                    bg-black bg-opacity-40 px-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-        <div className="px-6 py-4 border-b border-gray-200 flex
-                        items-center justify-between">
+     <div className="fixed inset-0 z-50 bg-black/40 overflow-y-auto">
+      <div className="min-h-screen flex justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-8">
+          <div
+            className="px-6 py-4 border-b border-gray-200 flex
+                       items-center justify-between"
+          >
           <h3 className="font-semibold text-gray-800">{title}</h3>
           <button
             onClick={onClose}
@@ -675,6 +678,7 @@ function Modal({ title, onClose, children }) {
         </div>
         <div className="px-6 py-5">{children}</div>
       </div>
+    </div>
     </div>
   )
 }
@@ -719,25 +723,17 @@ function AmountNoteFields({ form, setForm, label, accounts = [] }) {
           <option value="">Select account...</option>
           {accounts.map(a => (
             <option key={a.id} value={a.id}>
-              {a.name} — Rs.{' '}
-              {parseFloat(a.balance).toLocaleString('en-NP')}
+              {a.name} ({a.account_type_display})
             </option>
           ))}
         </select>
       </div>
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Date (BS) <span className="text-red-500">*</span>
-        </label>
-        <input
-          type="text"
-          className="input-field font-mono"
-          placeholder="2082-02-11"
-          value={form.nepali_date}
-          onChange={(e) => setForm({ ...form, nepali_date: e.target.value })}
-          required
-        />
-      </div>
+      <BSDatePicker
+        label="Date (BS)"
+        value={form.nepali_date}
+        onChange={(val) => setForm({ ...form, nepali_date: val })}
+        required
+      />
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
           Note (optional)

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import AdminLayout from '../../components/AdminLayout'
 import api from '../../lib/api'
 import { toBS } from '../../lib/nepaliDate'
+import BSDatePicker from '../../components/BSDatePicker'
 import useAccounts from '../../hooks/useAccounts'
 
 const EMPTY_FORM = {
@@ -421,11 +422,11 @@ export default function AdminIncome() {
 
       {/* Add / Edit income modal */}
       {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center
-                        bg-black bg-opacity-40 px-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="px-6 py-4 border-b border-gray-200 flex
-                            items-center justify-between">
+        <div className="fixed inset-0 z-50 bg-black/40 overflow-y-auto">
+    <div className="min-h-screen flex justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-8">
+        <div className="px-6 py-4 border-b border-gray-200 flex
+                        items-center justify-between">
               <h3 className="font-semibold text-gray-800">
                 {editItem ? 'Edit income' : 'Record income'}
               </h3>
@@ -494,7 +495,7 @@ export default function AdminIncome() {
                   <option value="">Select account...</option>
                   {accounts.map(a => (
                     <option key={a.id} value={a.id}>
-                      {a.name} — Rs. {parseFloat(a.balance).toLocaleString('en-NP')}
+                      {a.name} ({a.account_type_display})
                     </option>
                   ))}
                 </select>
@@ -504,12 +505,9 @@ export default function AdminIncome() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Date (BS) <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="text"
-                  className="input-field font-mono"
-                  placeholder="2082-02-11"
+                <BSDatePicker
                   value={form.nepali_date}
-                  onChange={(e) => setForm({ ...form, nepali_date: e.target.value })}
+                  onChange={(val) => setForm({ ...form, nepali_date: val })}
                   required
                 />
               </div>
@@ -559,6 +557,7 @@ export default function AdminIncome() {
               </div>
             </form>
           </div>
+        </div>
         </div>
       )}
 
