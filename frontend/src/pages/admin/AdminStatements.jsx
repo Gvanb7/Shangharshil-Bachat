@@ -175,7 +175,7 @@ export default function AdminStatements() {
       const wb   = XLSX.utils.book_new()
       const rows = buildExcelRows(selected)
       const ws   = XLSX.utils.aoa_to_sheet(rows)
-      ws['!cols'] = [{ wch: 40 }, { wch: 18 }, { wch: 18 }]
+      ws['!cols'] = [{ wch: 8 }, { wch: 30 }, { wch: 18 }, { wch: 18 }]
       XLSX.utils.book_append_sheet(wb, ws, 'Trial Balance')
       XLSX.writeFile(
         wb,
@@ -194,86 +194,94 @@ export default function AdminStatements() {
     const f    = (n) => parseFloat(n || 0).toFixed(2)
     const rows = []
 
-    rows.push(['SHANGHARSHIL YUVA BACHAT SAMUHA', '', ''])
-    rows.push(['Trial Balance', '', ''])
+    rows.push(['Shree Shangharshil Bachat Samuha', '', '', ''])
+    rows.push(['Trial Balance', '', '', ''])
     rows.push([
       tb.period_type === 'monthly'
         ? `${tb.bs_month_name} ${tb.bs_year}`
         : `Fiscal Year ${tb.fiscal_year}`,
-      '', '',
+      '', '', '',
     ])
-    rows.push([`Period: ${tb.start_date_ad} to ${tb.end_date_ad}`, '', ''])
-    rows.push(['', '', ''])
-    rows.push(['Account', 'Debit (Dr.)', 'Credit (Cr.)'])
-    rows.push(['', '', ''])
+    rows.push([`Period: ${tb.start_date_ad} to ${tb.end_date_ad}`, '', '', ''])
+    rows.push(['', '', '', ''])
+    rows.push(['Code', 'Account', 'Debit (Rs.)', 'Credit (Rs.)'])
+    rows.push(['', '', '', ''])
 
     // Assets
-    rows.push(['ASSETS', '', ''])
     let assetTotal = 0
+    rows.push(['1000', 'ASSETS', '', ''])
     for (const item of tb.line_items?.assets || []) {
-      rows.push([`  ${item.name}`, f(item.debit), ''])
+      rows.push([item.code || '', `  ${item.name}`, f(item.debit), ''])
       assetTotal += parseFloat(item.debit || 0)
     }
-    rows.push(['  Total Assets', f(assetTotal), ''])
-    rows.push(['', '', ''])
+    rows.push(['', '  TOTAL ASSETS', f(assetTotal), ''])
+    rows.push(['', '', '', ''])
 
     // Liabilities
-    rows.push(['LIABILITIES', '', ''])
     let liabTotal = 0
+    rows.push(['2000', 'LIABILITIES', '', ''])
     for (const item of tb.line_items?.liabilities || []) {
-      rows.push([`  ${item.name}`, '', f(item.credit)])
+      rows.push([item.code || '', `  ${item.name}`, '', f(item.credit)])
       liabTotal += parseFloat(item.credit || 0)
     }
-    rows.push(['  Total Liabilities', '', f(liabTotal)])
-    rows.push(['', '', ''])
+    rows.push(['', '  TOTAL LIABILITIES', '', f(liabTotal)])
+    rows.push(['', '', '', ''])
 
     // Income
-    rows.push(['INCOME (this period)', '', ''])
     let incTotal = 0
-    for (const item of tb.line_items?.income || []) {
-      rows.push([`  ${item.name}`, '', f(item.credit)])
-      incTotal += parseFloat(item.credit || 0)
+    if ((tb.line_items?.income || []).length > 0) {
+      rows.push(['3000', 'INCOME', '', ''])
+      for (const item of tb.line_items?.income || []) {
+        rows.push([item.code || '', `  ${item.name}`, '', f(item.credit)])
+        incTotal += parseFloat(item.credit || 0)
+      }
+      rows.push(['', '  TOTAL INCOME', '', f(incTotal)])
+      rows.push(['', '', '', ''])
     }
-    rows.push(['  Total Income', '', f(incTotal)])
-    rows.push(['', '', ''])
 
     // Expenses
-    rows.push(['EXPENSES (this period)', '', ''])
     let expTotal = 0
-    for (const item of tb.line_items?.expenses || []) {
-      rows.push([`  ${item.name}`, f(item.debit), ''])
-      expTotal += parseFloat(item.debit || 0)
+    if ((tb.line_items?.expenses || []).length > 0) {
+      rows.push(['4000', 'EXPENSES', '', ''])
+      for (const item of tb.line_items?.expenses || []) {
+        rows.push([item.code || '', `  ${item.name}`, f(item.debit), ''])
+        expTotal += parseFloat(item.debit || 0)
+      }
+      rows.push(['', '  TOTAL EXPENSES', f(expTotal), ''])
+      rows.push(['', '', '', ''])
     }
-    rows.push(['  Total Expenses', f(expTotal), ''])
-    rows.push(['', '', ''])
 
     // Equity
-    rows.push(['EQUITY', '', ''])
-    rows.push(['  Opening Equity', '', f(tb.opening_equity)])
+    rows.push(['', 'EQUITY', '', ''])
+    rows.push(['', '  Opening Equity', '', f(tb.opening_equity)])
     const surplus = parseFloat(tb.net_surplus || 0)
     rows.push([
+      '',
       `  Net ${surplus >= 0 ? 'Surplus' : 'Deficit'}`,
       surplus < 0 ? f(Math.abs(surplus)) : '',
       surplus >= 0 ? f(surplus) : '',
     ])
-    rows.push(['  Closing Equity', '', f(tb.closing_equity)])
-    rows.push(['', '', ''])
+    rows.push(['', '  TOTAL EQUITY', '', f(tb.closing_equity)])
+    rows.push(['', '', '', ''])
 
-    // Totals
+    // Grand Total
     rows.push([
-      tb.is_balanced ? '✓ BALANCED' : '✗ NOT BALANCED',
+      '',
+      'GRAND TOTAL',
       f(tb.line_items?.totals?.debit),
       f(tb.line_items?.totals?.credit),
     ])
 
     if (!tb.is_balanced) {
-      rows.push([
-        `Difference: Rs. ${f(tb.difference)}`, '', ''
-      ])
+      rows.push(['', `Difference: Rs. ${f(tb.difference)}`, '', ''])
+    } else {
+      rows.push(['', '✓ BALANCED', '', ''])
     }
 
-    rows.push(['', '', ''])
-    rows.push([`Generated: ${new Date(tb.generated_at).toLocaleString()}`, '', ''])
+    rows.push(['', '', '', ''])
+    rows.push(['Prepared by: _____________    Approved by: _____________    Date: _____________', '', '', ''])
+    rows.push(['', '', '', ''])
+    rows.push([`Generated: ${new Date(tb.generated_at).toLocaleString()}`, '', '', ''])
 
     return rows
   }
@@ -660,16 +668,19 @@ export default function AdminStatements() {
 
 // ── Statement content ─────────────────────────────────────────────────────────
 
+// Replace the entire StatementContent function with this updated version
+
 function StatementContent({ statement: s, fmt }) {
   const isMonthly = s.period_type === 'monthly'
+  const netSurplus = parseFloat(s.net_surplus || 0)
 
   return (
-    <div className="font-mono text-xs text-gray-800 space-y-4 print:text-black">
+    <div className="font-mono text-xs text-gray-800 print:text-black">
 
       {/* Header */}
-      <div className="text-center space-y-1 border-b-2 border-gray-800 pb-3">
+      <div className="text-center space-y-1 border-b-2 border-gray-800 pb-3 mb-4">
         <p className="text-base font-bold uppercase tracking-wide">
-          Shangharshil Yuva Bachat Samuha
+          Shree Shangharshil Bachat Samuha
         </p>
         <p className="text-sm font-semibold">Trial Balance</p>
         <p className="text-sm">
@@ -678,181 +689,173 @@ function StatementContent({ statement: s, fmt }) {
             : `Fiscal Year ${s.fiscal_year}`
           }
         </p>
-        <p className="text-xs text-gray-500">
-          Period: {s.start_date_ad} to {s.end_date_ad}
-        </p>
       </div>
 
-      {/* Column headers */}
-      <div className="grid grid-cols-3 gap-2 font-bold border-b
-                      border-gray-400 pb-1">
-        <span>Account</span>
-        <span className="text-right">Debit (Dr.)</span>
-        <span className="text-right">Credit (Cr.)</span>
-      </div>
+      {/* Table */}
+      <table className="w-full border-collapse text-xs table-fixed"> 
+        <thead>
+          <tr className="border-b-2 border-gray-800">
+            <th className="text-left py-1.5 pr-2 font-bold w-[55%]">Account</th>
+            <th className="text-right py-1.5 pl-2 font-bold w-[22.5%]">Debit (Rs.)</th>
+            <th className="text-right py-1.5 pl-2 font-bold w-[22.5%]">Credit (Rs.)</th>
+          </tr>
+        </thead>
+        <tbody>
 
-      {/* Assets */}
-      <Section
-        title="ASSETS"
-        items={s.line_items?.assets || []}
-        totalLabel="Total Assets"
-        totalDebit={s.total_assets}
-        totalCredit={null}
-        fmt={fmt}
-      />
+          {/* ASSETS */}
+          <tr className="border-b border-gray-300">
+            <td className="py-1.5 pr-2 font-bold uppercase">ASSETS</td>
+            <td className="py-1.5 pl-2"></td>
+            <td className="py-1.5 pl-2"></td>
+          </tr>
+          {(s.line_items?.assets || []).map((item, i) => (
+            <tr key={`a-${i}`} className="border-b border-gray-100">
+              <td className="py-1 pr-2 pl-4">{item.name}</td>
+              <td className="py-1 pl-2 text-right">{fmt(item.debit)}</td>
+              <td className="py-1 pl-2 text-right"></td>
+            </tr>
+          ))}
+          <tr className="border-b border-gray-300 font-bold">
+            <td className="py-1.5 pr-2 pl-4">TOTAL ASSETS</td>
+            <td className="py-1.5 pl-2 text-right">{fmt(s.total_assets)}</td>
+            <td className="py-1.5 pl-2 text-right"></td>
+          </tr>
 
-      {/* Liabilities */}
-      <Section
-        title="LIABILITIES"
-        items={s.line_items?.liabilities || []}
-        totalLabel="Total Liabilities"
-        totalDebit={null}
-        totalCredit={s.total_liabilities}
-        fmt={fmt}
-      />
+          {/* LIABILITIES */}
+          <tr className="border-b border-gray-300">
+            <td className="py-1.5 pr-2 font-bold uppercase">LIABILITIES</td>
+            <td className="py-1.5 pl-2"></td>
+            <td className="py-1.5 pl-2"></td>
+          </tr>
+          {(s.line_items?.liabilities || []).map((item, i) => (
+            <tr key={`l-${i}`} className="border-b border-gray-100">
+              <td className="py-1 pr-2 pl-4">{item.name}</td>
+              <td className="py-1 pl-2 text-right"></td>
+              <td className="py-1 pl-2 text-right">{fmt(item.credit)}</td>
+            </tr>
+          ))}
+          <tr className="border-b border-gray-300 font-bold">
+            <td className="py-1.5 pr-2 pl-4">TOTAL LIABILITIES</td>
+            <td className="py-1.5 pl-2 text-right"></td>
+            <td className="py-1.5 pl-2 text-right">{fmt(s.total_liabilities)}</td>
+          </tr>
 
-      {/* Income */}
-      <Section
-        title="INCOME (this period)"
-        items={s.line_items?.income || []}
-        totalLabel="Total Income"
-        totalDebit={null}
-        totalCredit={s.total_income}
-        fmt={fmt}
-      />
+          {/* INCOME (if present) */}
+          {(s.line_items?.income || []).length > 0 && (
+            <>
+              <tr className="border-b border-gray-300">
+                <td className="py-1.5 pr-2 font-bold uppercase">INCOME</td>
+                <td className="py-1.5 pl-2"></td>
+                <td className="py-1.5 pl-2"></td>
+              </tr>
+              {(s.line_items?.income || []).map((item, i) => (
+                <tr key={`i-${i}`} className="border-b border-gray-100">
+                  <td className="py-1 pr-2 pl-4">{item.name}</td>
+                  <td className="py-1 pl-2 text-right"></td>
+                  <td className="py-1 pl-2 text-right">{fmt(item.credit)}</td>
+                </tr>
+              ))}
+              <tr className="border-b border-gray-300 font-bold">
+                <td className="py-1.5 pr-2 pl-4">TOTAL INCOME</td>
+                <td className="py-1.5 pl-2 text-right"></td>
+                <td className="py-1.5 pl-2 text-right">{fmt(s.total_income)}</td>
+              </tr>
+            </>
+          )}
 
-      {/* Expenses */}
-      <Section
-        title="EXPENSES (this period)"
-        items={s.line_items?.expenses || []}
-        totalLabel="Total Expenses"
-        totalDebit={s.total_expenses}
-        totalCredit={null}
-        fmt={fmt}
-      />
+          {/* EXPENSES (if present) */}
+          {(s.line_items?.expenses || []).length > 0 && (
+            <>
+              <tr className="border-b border-gray-300">
+                <td className="py-1.5 pr-2 font-bold uppercase">EXPENSES</td>
+                <td className="py-1.5 pl-2"></td>
+                <td className="py-1.5 pl-2"></td>
+              </tr>
+              {(s.line_items?.expenses || []).map((item, i) => (
+                <tr key={`e-${i}`} className="border-b border-gray-100">
+                  <td className="py-1 pr-2 pl-4">{item.name}</td>
+                  <td className="py-1 pl-2 text-right">{fmt(item.debit)}</td>
+                  <td className="py-1 pl-2 text-right"></td>
+                </tr>
+              ))}
+              <tr className="border-b border-gray-300 font-bold">
+                <td className="py-1.5 pr-2 pl-4">TOTAL EXPENSES</td>
+                <td className="py-1.5 pl-2 text-right">{fmt(s.total_expenses)}</td>
+                <td className="py-1.5 pl-2 text-right"></td>
+              </tr>
+            </>
+          )}
 
-      {/* Equity */}
-      <div className="space-y-1">
-        <p className="font-bold uppercase border-b border-gray-300 pb-1">
-          EQUITY
-        </p>
-        <Row
-          label="  Opening Equity"
-          debit={null}
-          credit={s.opening_equity}
-          fmt={fmt}
-        />
-        <Row
-          label={`  Net ${parseFloat(s.net_surplus || 0) >= 0
-            ? 'Surplus' : 'Deficit'}`}
-          debit={parseFloat(s.net_surplus || 0) < 0
-            ? Math.abs(parseFloat(s.net_surplus)) : null}
-          credit={parseFloat(s.net_surplus || 0) >= 0
-            ? s.net_surplus : null}
-          fmt={fmt}
-        />
-        <Row
-          label="  Closing Equity"
-          debit={null}
-          credit={s.closing_equity}
-          fmt={fmt}
-          bold
-        />
-      </div>
+          {/* EQUITY */}
+          <tr className="border-b border-gray-300">
+            <td className="py-1.5 pr-2 font-bold uppercase">EQUITY</td>
+            <td className="py-1.5 pl-2"></td>
+            <td className="py-1.5 pl-2"></td>
+          </tr>
+          <tr className="border-b border-gray-100">
+            <td className="py-1 pr-2 pl-4">Opening Equity</td>
+            <td className="py-1 pl-2 text-right"></td>
+            <td className="py-1 pl-2 text-right">{fmt(s.opening_equity)}</td>
+          </tr>
+          <tr className="border-b border-gray-100">
+            <td className="py-1 pr-2 pl-4">
+              Net {netSurplus >= 0 ? 'Surplus' : 'Deficit'}
+            </td>
+            <td className="py-1 pl-2 text-right">
+              {netSurplus < 0 ? fmt(Math.abs(netSurplus)) : ''}
+            </td>
+            <td className="py-1 pl-2 text-right">
+              {netSurplus >= 0 ? fmt(netSurplus) : ''}
+            </td>
+          </tr>
+          <tr className="border-b border-gray-300 font-bold">
+            <td className="py-1.5 pr-2 pl-4">TOTAL EQUITY</td>
+            <td className="py-1.5 pl-2 text-right"></td>
+            <td className="py-1.5 pl-2 text-right">{fmt(s.closing_equity)}</td>
+          </tr>
 
-      {/* Totals */}
-      <div className="border-t-2 border-gray-800 pt-2 space-y-1">
-        <div className="grid grid-cols-3 gap-2 font-bold">
-          <span>TOTAL</span>
-          <span className="text-right">
-            {fmt(s.line_items?.totals?.debit)}
-          </span>
-          <span className="text-right">
-            {fmt(s.line_items?.totals?.credit)}
-          </span>
-        </div>
-        {!s.is_balanced && (
-          <div className="grid grid-cols-3 gap-2 text-red-600">
-            <span>Difference</span>
-            <span className="text-right">{fmt(s.difference)}</span>
-            <span></span>
+          {/* GRAND TOTAL */}
+          <tr className="border-t-2 border-gray-800 font-bold">
+            <td className="py-2 pr-2">GRAND TOTAL</td>
+            <td className="py-2 pl-2 text-right">{fmt(s.line_items?.totals?.debit)}</td>
+            <td className="py-2 pl-2 text-right">{fmt(s.line_items?.totals?.credit)}</td>
+          </tr>
+
+          {/* Balanced / Difference */}
+          {s.is_balanced ? (
+            <tr>
+              <td className="py-1 pr-2 text-green-700 font-bold">✓ BALANCED</td>
+              <td className="py-1 pl-2"></td>
+              <td className="py-1 pl-2"></td>
+            </tr>
+          ) : (
+            <tr className="text-red-600">
+              <td className="py-1 pr-2">Difference</td>
+              <td className="py-1 pl-2 text-right">{fmt(s.difference)}</td>
+              <td className="py-1 pl-2"></td>
+            </tr>
+          )}
+
+        </tbody>
+      </table>
+
+      {/* Signature Lines */}
+      <div className="mt-8 pt-4 border-t border-gray-300">
+        <div className="grid grid-cols-3 gap-8 text-center">
+          <div>
+            <div className="border-b border-gray-400 pb-8 mb-1"></div>
+            <p className="text-xs font-medium">Prepared by</p>
           </div>
-        )}
-        <p className={`text-center text-sm font-bold mt-2
-          ${s.is_balanced ? 'text-green-700' : 'text-red-600'}`}>
-          {s.is_balanced
-            ? '✓ Trial Balance is BALANCED'
-            : '✗ Trial Balance is NOT BALANCED'
-          }
-        </p>
-      </div>
-
-      {/* Footer */}
-      <div className="border-t border-gray-300 pt-2 text-gray-400 text-center">
-        <p>
-          Generated: {new Date(s.generated_at).toLocaleString()}
-        </p>
-        <p>
-          {s.is_auto_generated
-            ? 'Auto-generated'
-            : s.generated_by_name
-              ? `By: ${s.generated_by_name}`
-              : ''
-          }
-        </p>
-      </div>
-
-    </div>
-  )
-}
-
-// ── Reusable sub-components ───────────────────────────────────────────────────
-
-function Section({ title, items, totalLabel, totalDebit, totalCredit, fmt }) {
-  return (
-    <div className="space-y-1">
-      <p className="font-bold uppercase border-b border-gray-300 pb-1">
-        {title}
-      </p>
-      {items.length === 0 ? (
-        <div className="grid grid-cols-3 gap-2 text-gray-400 italic">
-          <span>  No entries</span>
-          <span></span>
-          <span></span>
+          <div>
+            <div className="border-b border-gray-400 pb-8 mb-1"></div>
+            <p className="text-xs font-medium">Approved by</p>
+          </div>
+          <div>
+            <div className="border-b border-gray-400 pb-8 mb-1"></div>
+            <p className="text-xs font-medium">Date</p>
+          </div>
         </div>
-      ) : items.map((item, i) => (
-        <Row
-          key={i}
-          label={`  ${item.name}`}
-          debit={parseFloat(item.debit || 0) > 0 ? item.debit : null}
-          credit={parseFloat(item.credit || 0) > 0 ? item.credit : null}
-          fmt={fmt}
-        />
-      ))}
-      <Row
-        label={`  ${totalLabel}`}
-        debit={totalDebit}
-        credit={totalCredit}
-        fmt={fmt}
-        bold
-      />
-    </div>
-  )
-}
-
-function Row({ label, debit, credit, fmt, bold }) {
-  return (
-    <div className={`grid grid-cols-3 gap-2
-      ${bold ? 'font-bold border-t border-gray-300 pt-1 mt-1' : ''}`}>
-      <span className="truncate">{label}</span>
-      <span className="text-right">
-        {debit !== null && debit !== undefined && debit !== ''
-          ? fmt(debit) : ''}
-      </span>
-      <span className="text-right">
-        {credit !== null && credit !== undefined && credit !== ''
-          ? fmt(credit) : ''}
-      </span>
+      </div>
     </div>
   )
 }
