@@ -1,9 +1,9 @@
 from rest_framework import serializers
 from decimal import Decimal
 from .models import(
-    SavingsAccount, SavingsTransaction, Loan, LoanRepayment, Expenditure,
+    Penalty, SavingsAccount, SavingsTransaction, Loan, LoanRepayment, Expenditure,
     ExpenditureCategory, Income, IncomeCategory, MemberDocument, Account, AccountTransaction,
-    TrialBalance, CooperativeSettings,
+    TrialBalance, CooperativeSettings, Borrower
 )
 from .services import calculate_loan_summary
 
@@ -40,29 +40,25 @@ class DepositWithdrawSerializer(serializers.Serializer):
         return value
     
 class LoanSerializer(serializers.ModelSerializer):
-    member_name = serializers.CharField(source='member.full_name', read_only=True)
-    approved_by_name = serializers.CharField(source='approved_by.full_name', read_only=True)
-    loan_summary = serializers.SerializerMethodField()
-    
+    member_name   = serializers.SerializerMethodField()
+    member_phone  = serializers.SerializerMethodField()
+    is_member_loan = serializers.BooleanField(read_only=True)
+
     class Meta:
-        model = Loan
+        model  = Loan
         fields = [
-            'id', 'member', 'member_name', 'principal', 'interest_rate', 
-            'term_months', 'status', 'monthly_installment', 'total_payable',
-            'amount_paid', 'amount_remaining', 'purpose', 'disbursed_on', 
-            'due_date', 'approved_by', 'approved_by_name', 'loan_summary',
-            'created_at',
+            'id', 'member', 'borrower', 'member_name', 'member_phone',
+            'is_member_loan', 'principal', 'purpose', 'interest_rate',
+            'term_months', 'first_due_date', 'status', 'amount_paid',
+            'amount_remaining', 'disbursed_on', 'created_at',
         ]
-        read_only_fields = [
-            'id', 'status', 'monthly_installment', 
-            'toal_payable', 'amount_paid', 'amount_remaining', 
-            'disbursed_on', 'due_date', 'approved_by', 'created_at',
-        ]
-        
-    def get_loan_summary(self, obj):
-        if obj.status == 'pending':
-            return calculate_loan_summary(obj.principal, obj.interest_rate, obj.term_months)
-        return None
+        read_only_fields = ['id', 'amount_paid', 'amount_remaining', 'created_at']
+
+    def get_member_name(self, obj):
+        return obj.borrower_name
+
+    def get_member_phone(self, obj):
+        return obj.borrower_phone
     
 class LoanRepaymentSerializer(serializers.ModelSerializer):
     recorded_by_name = serializers.CharField(source='recorded_by.full_name', read_only=True)
@@ -70,13 +66,13 @@ class LoanRepaymentSerializer(serializers.ModelSerializer):
     class Meta:
         model  = LoanRepayment
         fields = [
-            'id', 'loan', 'amount_paid', 'principal_portion',
-            'interest_portion', 'balance_after', 'note',
-            'recorded_by', 'recorded_by_name', 'paid_at', 
-            'nepali_date',
+            'id', 'loan', 'amount_paid', 'penalty_portion',
+            'principal_portion', 'interest_portion', 'balance_after', 
+            'note','recorded_by', 'recorded_by_name', 
+            'paid_at', 'nepali_date',
         ]
         read_only_fields = [
-            'id', 'principal_portion', 'interest_portion',
+            'id', 'penalty_portion', 'principal_portion', 'interest_portion',
             'balance_after', 'recorded_by', 'paid_at',
         ]
         
@@ -277,3 +273,57 @@ class CooperativeSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model  = CooperativeSettings
         fields = ['opening_equity', 'opening_equity_set', 'updated_at']
+        
+class PenaltySerializer(serializers.ModelSerializer):
+    member_name     = serializers.CharField(source='member.full_name', read_only=True)
+    recorded_by_name = serializers.CharField(source='recorded_by.full_name', read_only=True)
+    account_name    = serializers.CharField(source='account.name', read_only=True)
+
+    class Meta:
+        model  = Penalty
+        fields = [
+            'id', 'penalty_type', 'member', 'member_name',
+            'savings_account', 'loan', 'amount', 'amount_remaining',
+            'reason', 'account', 'account_name', 'nepali_date',
+            'is_paid', 'recorded_by_name', 'created_at',
+        ]
+        read_only_fields = ['id', 'amount_remaining', 'is_paid', 'created_at']
+        
+class BorrowerSerializer(serializers.ModelSerializer):
+    citizenship_front_url = serializers.SerializerMethodField()
+    citizenship_back_url  = serializers.SerializerMethodField()
+    signature_url         = serializers.SerializerMethodField()
+    photo_url              = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = Borrower
+        fields = [
+            'id', 'full_name', 'phone', 'address',
+            'citizenship_front', 'citizenship_front_url',
+            'citizenship_back',  'citizenship_back_url',
+            'signature',          'signature_url',
+            'photo',               'photo_url',
+            'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']
+
+    def _build_url(self, obj, field_name):
+        request = self.context.get('request')
+        field   = getattr(obj, field_name)
+        if field and request:
+            return request.build_absolute_uri(field.url)
+        elif field:
+            return field.url
+        return None
+
+    def get_citizenship_front_url(self, obj):
+        return self._build_url(obj, 'citizenship_front')
+
+    def get_citizenship_back_url(self, obj):
+        return self._build_url(obj, 'citizenship_back')
+
+    def get_signature_url(self, obj):
+        return self._build_url(obj, 'signature')
+
+    def get_photo_url(self, obj):
+        return self._build_url(obj, 'photo')

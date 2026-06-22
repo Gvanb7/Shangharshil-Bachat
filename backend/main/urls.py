@@ -11,6 +11,9 @@ urlpatterns = [
     path('savings/<uuid:account_id>/deposit/',  views.AdminDepositView.as_view()),
     path('savings/<uuid:account_id>/withdraw/', views.AdminWithdrawView.as_view()),
     path('savings/<uuid:account_id>/transactions/', views.AdminTransactionListView.as_view()),
+    path('savings/<uuid:account_id>/penalty/', views.AdminApplySavingsPenaltyView.as_view()),
+    
+    path('penalties/', views.AdminPenaltyListView.as_view()),
 
     # ── Member savings (own) ─────────────────────────────────────────────────
     path('member/savings/', views.MemberSavingsView.as_view()),
@@ -25,11 +28,14 @@ urlpatterns = [
     path('loans/<uuid:loan_id>/repay/', views.AdminRecordRepaymentView.as_view()),
     path('loans/<uuid:loan_id>/repayments/', views.AdminLoanRepaymentListView.as_view()),
     path('loans/<uuid:loan_id>/schedule/', views.AdminLoanScheduleView.as_view()),
+    path('loans/<uuid:loan_id>/penalty/', views.AdminApplyLoanPenaltyView.as_view()),
 
     # ── Member loans ────────────────────────────────────────────────────
     path('member/loans/', views.MemberLoanView.as_view()),
     path('member/loans/apply/',                  views.MemberApplyLoanView.as_view()),
     path('member/loans/<uuid:loan_id>/cancel/',  views.MemberApplyLoanView.as_view()),
+    
+    path('member/penalties/', views.MemberPenaltyListView.as_view()),
 
     # ── Expenditure ───────────────────────────────────────────────────────────
     path('expenditures/', views.AdminExpenditureView.as_view()),
@@ -74,4 +80,12 @@ urlpatterns = [
      # Cooperative settings
      path('settings/',
           views.AdminCooperativeSettingsView.as_view()),
+     
+     path('fiscal-years/', views.FiscalYearListView.as_view()),
+     path('fiscal-years/months/', views.FiscalYearMonthsView.as_view()),
+     path('fiscal-years/current/', views.CurrentFiscalYearView.as_view()),
+     
+     path('borrowers/', views.AdminBorrowerListCreateView.as_view()),
+     path('borrowers/<uuid:borrower_id>/',  views.AdminBorrowerDetailView.as_view()),
+     path('loans/borrower/create/', views.AdminCreateBorrowerLoanView.as_view()),
 ]

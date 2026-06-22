@@ -5,6 +5,7 @@ import useAuthStore from './store/authStore'
 import LoginPage        from './pages/loginPage'
 import AdminDashboard   from './pages/admin/AdminDashboard'
 import AdminMembers     from './pages/admin/AdminMembers'
+import AdminBorrowers from './pages/admin/AdminBorrowers'
 import AdminSavings     from './pages/admin/AdminSavings'
 import AdminLoans       from './pages/admin/AdminLoans'
 import AdminExpenditure from './pages/admin/AdminExpenditure'
@@ -72,7 +73,9 @@ export default function App() {
         <Route path="/admin/statements" element={
           <AdminRoute><AdminStatements /></AdminRoute>
         } />
-
+        <Route path="/admin/borrowers" element={
+          <AdminRoute><AdminBorrowers /></AdminRoute>}
+        />
         {/* Member routes */}
         <Route path="/member" element={
           <MemberRoute><MemberDashboard /></MemberRoute>

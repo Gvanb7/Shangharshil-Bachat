@@ -158,7 +158,8 @@ def record_loan_repayment(loan, amount_paid, recorded_by, paid_at, nepali_date, 
     Splits payment into interest and principal portions.
     Closes loan automatically when fully paid.
     """
-    from .models import LoanRepayment
+    from .models import LoanRepayment, Penalty
+    from django.db.models import Sum
 
     amount_paid = round2(amount_paid)
 
@@ -167,37 +168,86 @@ def record_loan_repayment(loan, amount_paid, recorded_by, paid_at, nepali_date, 
 
     if amount_paid <= Decimal('0.00'):
         raise ValueError('Repayment amount must be greater than zero.')
+    
+    remaining_to_allocate = amount_paid
 
-    # Calculate interest on remaining principal for this period
-    remaining_principal = loan.amount_remaining - _unpaid_interest(loan)
-    monthly_rate        = loan.interest_rate / Decimal('100') / Decimal('12')
-    interest_portion    = round2(remaining_principal * monthly_rate)
-    principal_portion   = round2(amount_paid - interest_portion)
+    # ── STEP 1: pay off unpaid penalties first ──────────────────────────────────
+    unpaid_penalties = Penalty.objects.filter(
+        loan=loan,
+        penalty_type='loan',
+        is_paid=False,
+    ).order_by('created_at')
 
-    # Guard: if overpaying, cap at remaining
-    if amount_paid > loan.amount_remaining:
-        amount_paid       = loan.amount_remaining
-        principal_portion = amount_paid - interest_portion
+    penalty_paid_total = Decimal('0.00')
 
+    for penalty in unpaid_penalties:
+        if remaining_to_allocate <= Decimal('0.00'):
+            break
+
+        pay_amount = min(penalty.amount_remaining, remaining_to_allocate)
+        penalty.amount_remaining = round2(penalty.amount_remaining - pay_amount)
+
+        if penalty.amount_remaining <= Decimal('0.00'):
+            penalty.amount_remaining = Decimal('0.00')
+            penalty.is_paid = True
+
+        penalty.save()
+
+        penalty_paid_total        += pay_amount
+        remaining_to_allocate      = round2(remaining_to_allocate - pay_amount)
+
+    # ── STEP 2: pay interest ─────────────────────────────────────────────────
+    # interest is calculated on remaining principal (excluding unpaid penalty)
+    total_unpaid_penalty = get_unpaid_loan_penalties(loan)
+    remaining_principal  = round2(
+        loan.amount_remaining - total_unpaid_penalty - _unpaid_interest_estimate(loan)
+    )
+
+    monthly_rate      = loan.interest_rate / Decimal('100') / Decimal('12')
+    interest_due       = round2(remaining_principal * monthly_rate)
+    interest_paid_total = min(interest_due, remaining_to_allocate)
+    remaining_to_allocate = round2(remaining_to_allocate - interest_paid_total)
+
+    # ── STEP 3: remainder goes to principal ──────────────────────────────────
+    principal_paid_total = remaining_to_allocate
+
+    # cap at loan's actual remaining balance
+    total_allocated = penalty_paid_total + interest_paid_total + principal_paid_total
+    if total_allocated > loan.amount_remaining:
+        # adjust principal down if over-allocated (edge case safety)
+        overage = total_allocated - loan.amount_remaining
+        principal_paid_total = round2(principal_paid_total - overage)
+        if principal_paid_total < Decimal('0.00'):
+            principal_paid_total = Decimal('0.00')
+
+    # ── UPDATE LOAN ───────────────────────────────────────────────────────────
     loan.amount_paid      += amount_paid
-    loan.amount_remaining  = round2(loan.amount_remaining - amount_paid)
+    loan.amount_remaining  = round2(
+        loan.amount_remaining - penalty_paid_total -
+        interest_paid_total - principal_paid_total
+    )
     if loan.amount_remaining <= Decimal('0.00'):
         loan.amount_remaining = Decimal('0.00')
-        loan.status           = 'closed'
+        loan.status = 'closed'
     loan.save()
 
     return LoanRepayment.objects.create(
         loan=loan,
         amount_paid=amount_paid,
-        principal_portion=principal_portion,
-        interest_portion=interest_portion,
+        penalty_portion=penalty_paid_total,
+        principal_portion=principal_paid_total,
+        interest_portion=interest_paid_total,
         balance_after=loan.amount_remaining,
         note=note,
-        paid_at = paid_at,
-        nepali_date = nepali_date,
+        paid_at=paid_at,
+        nepali_date=nepali_date,
         recorded_by=recorded_by,
     )
 
+
+def _unpaid_interest_estimate(loan):
+    """Helper — estimates unpaid interest portion for principal calculation."""
+    return Decimal('0.00')  # simplified; interest is recalculated each payment
 
 def _unpaid_interest(loan):
     """Helper — returns unpaid interest portion of remaining balance."""
@@ -219,8 +269,11 @@ def generate_loan_schedule(loan):
     balance     = Decimal(str(loan.principal))
     monthly_rate = Decimal(str(loan.interest_rate)) / Decimal('100') / Decimal('12')
     emi          = Decimal(str(loan.monthly_installment))
+    
+    anchor_date   = loan.first_due_date or loan.disbursed_on
 
     for month in range(1, loan.term_months + 1):
+        due_date = anchor_date + relativedelta(months=month) 
         interest_portion  = round2(balance * monthly_rate)
         principal_portion = round2(emi - interest_portion)
 
@@ -234,8 +287,6 @@ def generate_loan_schedule(loan):
         balance -= principal_portion
         if balance < Decimal('0.00'):
             balance = Decimal('0.00')
-
-        due_date = loan.disbursed_on + relativedelta(months=month)
 
         schedule.append({
             'month':              month,
@@ -331,240 +382,265 @@ def transfer_between_accounts(from_account, to_account, amount,
     
 def get_statement_data(tb):
     """
-    Calculate all trial balance figures live from source data.
-    Never uses stored totals — always recalculates from transactions.
-    Returns a dict with full statement data.
+    Calculate Receipts and Payments report live from transaction history.
+    Income/Expenditure are listed independently with totals only at the end.
     """
     from .models import (
-        Account, AccountTransaction,
-        Income, Expenditure,
-        SavingsAccount, Loan, LoanRepayment,
-        SavingsTransaction, CooperativeSettings,
+        Account, AccountTransaction, Income, Expenditure,
+        SavingsAccount, Loan, LoanRepayment, SavingsTransaction,
+        Penalty,
     )
-    from django.db.models import Sum, Q
+    from django.db.models import Sum
     from decimal import Decimal
 
     start_ad = tb.start_date_ad
     end_ad   = tb.end_date_ad
 
     def d(val):
-        """Safe decimal conversion."""
         if val is None:
             return Decimal('0.00')
         return round2(Decimal(str(val)))
 
-    # ── ASSETS ────────────────────────────────────────────────────────────────
-    # Account balances — live from Account model
-    account_items = []
+    # ── OPENING BALANCE (calculated from transactions before period start) ──
+    opening_total = Decimal('0.00')
+    opening_by_account = []
+
     for acct in Account.objects.filter(is_active=True).order_by('name'):
-        if acct.balance > Decimal('0'):
-            account_items.append({
-                'name':   acct.name,
-                'type':   acct.account_type,
-                'debit':  str(d(acct.balance)),
-                'credit': '0.00',
+        credits_before = d(
+            AccountTransaction.objects.filter(
+                account=acct,
+                transaction_type='credit',
+                created_at__date__lt=start_ad,
+            ).aggregate(total=Sum('amount'))['total']
+        )
+        debits_before = d(
+            AccountTransaction.objects.filter(
+                account=acct,
+                transaction_type='debit',
+                created_at__date__lt=start_ad,
+            ).aggregate(total=Sum('amount'))['total']
+        )
+        opening_balance = d(
+            acct.opening_balance + credits_before - debits_before
+        )
+        if opening_balance != Decimal('0.00'):
+            opening_by_account.append({
+                'name':   f'Opening {acct.name} Balance',
+                'amount': str(opening_balance),
             })
+        opening_total += opening_balance
 
-    # Loans outstanding — total remaining on active loans
-    loans_outstanding = d(
-        Loan.objects.filter(
-            status='active'
-        ).aggregate(
-            total=Sum('amount_remaining')
-        )['total']
+    # ── INCOME (Receipts) for this period ────────────────────────────────────
+    income_items = []
+
+    # opening balances go first under income
+    income_items.extend(opening_by_account)
+
+    # member savings deposits during period
+    savings_deposits = d(
+        SavingsTransaction.objects.filter(
+            type='deposit',
+            created_at__date__gte=start_ad,
+            created_at__date__lte=end_ad,
+        ).aggregate(total=Sum('amount'))['total']
     )
+    if savings_deposits > Decimal('0.00'):
+        income_items.append({
+            'name':   'Member Savings Deposits',
+            'amount': str(savings_deposits),
+        })
 
-    total_assets = d(
-        sum(Decimal(a['debit']) for a in account_items) +
-        loans_outstanding
+    # loan repayments received (principal + interest, NOT penalty—shown separately)
+    repayments_principal = d(
+        LoanRepayment.objects.filter(
+            paid_at__gte=start_ad,
+            paid_at__lte=end_ad,
+        ).aggregate(total=Sum('principal_portion'))['total']
     )
-
-    # ── LIABILITIES ───────────────────────────────────────────────────────────
-    # Member savings — total balance owed back to members
-    total_member_savings = d(
-        SavingsAccount.objects.filter(
-            is_active=True
-        ).aggregate(
-            total=Sum('balance')
-        )['total']
+    repayments_interest = d(
+        LoanRepayment.objects.filter(
+            paid_at__gte=start_ad,
+            paid_at__lte=end_ad,
+        ).aggregate(total=Sum('interest_portion'))['total']
     )
+    if repayments_principal > Decimal('0.00'):
+        income_items.append({
+            'name':   'Loan Repayments (Principal)',
+            'amount': str(repayments_principal),
+        })
+    if repayments_interest > Decimal('0.00'):
+        income_items.append({
+            'name':   'Loan Interest Collected',
+            'amount': str(repayments_interest),
+        })
 
-    liability_items = [{
-        'name':   'Member Savings',
-        'debit':  '0.00',
-        'credit': str(total_member_savings),
-    }]
+    # penalty collected — savings penalty (immediate) + loan penalty actually paid
+    savings_penalty = d(
+        Penalty.objects.filter(
+            penalty_type='savings',
+            created_at__date__gte=start_ad,
+            created_at__date__lte=end_ad,
+        ).aggregate(total=Sum('amount'))['total']
+    )
+    loan_penalty_paid = d(
+        LoanRepayment.objects.filter(
+            paid_at__gte=start_ad,
+            paid_at__lte=end_ad,
+        ).aggregate(total=Sum('penalty_portion'))['total']
+    )
+    total_penalty = d(savings_penalty + loan_penalty_paid)
+    if total_penalty > Decimal('0.00'):
+        income_items.append({
+            'name':   'Penalty Collected',
+            'amount': str(total_penalty),
+        })
 
-    total_liabilities = total_member_savings
-
-    # ── INCOME (period) ───────────────────────────────────────────────────────
-    income_by_cat = {}
-
-    # recorded income by category
+    # other income by category
     incomes = Income.objects.filter(
         income_date__gte=start_ad,
         income_date__lte=end_ad,
     ).select_related('category')
 
+    income_by_cat = {}
     for inc in incomes:
         cat = inc.category.name
-        income_by_cat[cat] = income_by_cat.get(
-            cat, Decimal('0')
-        ) + inc.amount
+        income_by_cat[cat] = income_by_cat.get(cat, Decimal('0')) + inc.amount
 
-    # loan interest collected this period
-    interest_collected = d(
-        LoanRepayment.objects.filter(
-            paid_at__gte=start_ad,
-            paid_at__lte=end_ad,
-        ).aggregate(
-            total=Sum('interest_portion')
-        )['total']
+    for cat, amt in sorted(income_by_cat.items()):
+        income_items.append({'name': cat, 'amount': str(d(amt))})
+
+    total_income = d(
+        sum(Decimal(i['amount']) for i in income_items)
     )
 
-    if interest_collected > Decimal('0'):
-        income_by_cat['Loan Interest Collected'] = (
-            income_by_cat.get('Loan Interest Collected', Decimal('0')) +
-            interest_collected
-        )
+    # ── EXPENDITURE (Payments) for this period ───────────────────────────────
+    expenditure_items = []
 
-    income_items = [
-        {
-            'name':   name,
-            'debit':  '0.00',
-            'credit': str(d(amount)),
-        }
-        for name, amount in sorted(income_by_cat.items())
-    ]
+    # loan disbursements
+    loan_disbursements = d(
+        AccountTransaction.objects.filter(
+            reference_type='loan_disbursement',
+            created_at__date__gte=start_ad,
+            created_at__date__lte=end_ad,
+        ).aggregate(total=Sum('amount'))['total']
+    )
+    if loan_disbursements > Decimal('0.00'):
+        expenditure_items.append({
+            'name':   'Loan Disbursements',
+            'amount': str(loan_disbursements),
+        })
 
-    total_income = d(sum(income_by_cat.values(), Decimal('0')))
+    # savings withdrawals
+    savings_withdrawals = d(
+        SavingsTransaction.objects.filter(
+            type='withdrawal',
+            created_at__date__gte=start_ad,
+            created_at__date__lte=end_ad,
+        ).aggregate(total=Sum('amount'))['total']
+    )
+    if savings_withdrawals > Decimal('0.00'):
+        expenditure_items.append({
+            'name':   'Savings Withdrawals',
+            'amount': str(savings_withdrawals),
+        })
 
-    # ── EXPENSES (period) ─────────────────────────────────────────────────────
-    expense_by_cat = {}
-
-    # savings interest paid to members — treated as expense
+    # savings interest paid to members
     savings_interest = d(
         SavingsTransaction.objects.filter(
             type='interest_credit',
             created_at__date__gte=start_ad,
             created_at__date__lte=end_ad,
-        ).aggregate(
-            total=Sum('amount')
-        )['total']
+        ).aggregate(total=Sum('amount'))['total']
     )
+    if savings_interest > Decimal('0.00'):
+        expenditure_items.append({
+            'name':   'Savings Interest Paid',
+            'amount': str(savings_interest),
+        })
 
-    if savings_interest > Decimal('0'):
-        expense_by_cat['Savings Interest Paid'] = savings_interest
-
-    # expenditures by category
+    # expenditure by category
     expenditures = Expenditure.objects.filter(
         expense_date__gte=start_ad,
         expense_date__lte=end_ad,
     ).select_related('category')
 
+    expense_by_cat = {}
     for exp in expenditures:
         cat = exp.category.name
-        expense_by_cat[cat] = expense_by_cat.get(
-            cat, Decimal('0')
-        ) + exp.amount
+        expense_by_cat[cat] = expense_by_cat.get(cat, Decimal('0')) + exp.amount
 
-    expense_items = [
-        {
-            'name':   name,
-            'debit':  str(d(amount)),
-            'credit': '0.00',
-        }
-        for name, amount in sorted(expense_by_cat.items())
-    ]
+    for cat, amt in sorted(expense_by_cat.items()):
+        expenditure_items.append({'name': cat, 'amount': str(d(amt))})
 
-    total_expenses = d(sum(expense_by_cat.values(), Decimal('0')))
+    # ── CLOSING BALANCE (calculated from transactions up to period end) ──────
+    closing_total = Decimal('0.00')
+    closing_by_account = []
 
-    # ── EQUITY ────────────────────────────────────────────────────────────────
-    # opening equity — from settings or previous closing equity
-    settings_obj   = CooperativeSettings.objects.first()
-    base_equity    = d(settings_obj.opening_equity if settings_obj else 0)
+    for acct in Account.objects.filter(is_active=True).order_by('name'):
+        credits_through = d(
+            AccountTransaction.objects.filter(
+                account=acct,
+                transaction_type='credit',
+                created_at__date__lte=end_ad,
+            ).aggregate(total=Sum('amount'))['total']
+        )
+        debits_through = d(
+            AccountTransaction.objects.filter(
+                account=acct,
+                transaction_type='debit',
+                created_at__date__lte=end_ad,
+            ).aggregate(total=Sum('amount'))['total']
+        )
+        closing_balance = d(
+            acct.opening_balance + credits_through - debits_through
+        )
+        if closing_balance != Decimal('0.00'):
+            closing_by_account.append({
+                'name':   f'Closing {acct.name} Balance',
+                'amount': str(closing_balance),
+            })
+        closing_total += closing_balance
 
-    # find previous month's closing equity
-    from .models import TrialBalance
-    from .bs_calendar import get_fiscal_year
+    # closing balances go at the end of expenditure side
+    expenditure_items.extend(closing_by_account)
 
-    opening_equity = base_equity
+    total_expenditure = d(
+        sum(Decimal(e['amount']) for e in expenditure_items)
+    )
 
-    if tb.period_type == 'monthly':
-        # get all prior monthly statements in order
-        prior = TrialBalance.objects.filter(
-            period_type  = 'monthly',
-            start_date_ad__lt = start_ad,
-        ).order_by('start_date_ad')
-
-        # recalculate closing equity chain from base
-        running_equity = base_equity
-        for prior_tb in prior:
-            prior_data      = get_statement_data(prior_tb)
-            running_equity  = prior_data['closing_equity']
-
-        opening_equity = running_equity
-
-    elif tb.period_type == 'annual':
-        # for annual — opening equity is base setting
-        opening_equity = base_equity
-
-    net_surplus    = d(total_income - total_expenses)
-    closing_equity = d(opening_equity + net_surplus)
-
-    # ── TRIAL BALANCE CHECK ───────────────────────────────────────────────────
-    # Dr side: Assets + Expenses
-    # Cr side: Liabilities + Income + Equity
-    total_dr = d(total_assets + total_expenses)
-    total_cr = d(total_liabilities + total_income + closing_equity)
-
-    difference  = abs(total_dr - total_cr)
-    is_balanced = difference < Decimal('0.01')
+    # ── verification check (not displayed as Dr/Cr, just internal sanity) ────
+    # Opening + Income(excl. opening) - Expenditure(excl. closing) should = Closing
+    income_excl_opening = d(
+        total_income - sum(Decimal(i['amount']) for i in opening_by_account)
+    )
+    expenditure_excl_closing = d(
+        total_expenditure - sum(Decimal(c['amount']) for c in closing_by_account)
+    )
+    expected_closing = d(opening_total + income_excl_opening - expenditure_excl_closing)
+    is_balanced = abs(expected_closing - closing_total) < Decimal('0.01')
 
     return {
-        'id':               str(tb.id),
-        'period_type':      tb.period_type,
-        'bs_year':          tb.bs_year,
-        'bs_month':         tb.bs_month,
-        'bs_month_name':    tb.bs_month_name,
-        'fiscal_year':      tb.fiscal_year,
-        'start_date_ad':    str(tb.start_date_ad),
-        'end_date_ad':      str(tb.end_date_ad),
-        'generated_at':     tb.generated_at.isoformat(),
+        'id':                str(tb.id),
+        'period_type':       tb.period_type,
+        'bs_year':           tb.bs_year,
+        'bs_month':          tb.bs_month,
+        'bs_month_name':     tb.bs_month_name,
+        'fiscal_year':       tb.fiscal_year,
+        'start_date_ad':     str(tb.start_date_ad),
+        'end_date_ad':       str(tb.end_date_ad),
+        'generated_at':      tb.generated_at.isoformat(),
         'generated_by_name': (
-            tb.generated_by.full_name or tb.generated_by.email
+            (tb.generated_by.full_name or tb.generated_by.email)
             if tb.generated_by else 'System'
         ),
         'is_auto_generated': tb.is_auto_generated,
-        'opening_equity':   str(opening_equity),
-        'total_assets':     str(total_assets),
-        'total_liabilities':str(total_liabilities),
-        'total_income':     str(total_income),
-        'total_expenses':   str(total_expenses),
-        'net_surplus':      str(net_surplus),
-        'closing_equity':   str(closing_equity),
-        'is_balanced':      is_balanced,
-        'difference':       str(difference),
-        'line_items': {
-            'assets':      account_items + [{
-                'name':   'Loans Outstanding',
-                'debit':  str(loans_outstanding),
-                'credit': '0.00',
-            }],
-            'liabilities': liability_items,
-            'income':      income_items,
-            'expenses':    expense_items,
-            'equity': {
-                'opening':     str(opening_equity),
-                'net_surplus': str(net_surplus),
-                'closing':     str(closing_equity),
-            },
-            'totals': {
-                'debit':      str(total_dr),
-                'credit':     str(total_cr),
-                'difference': str(difference),
-            },
-        },
+        'total_income':      str(total_income),
+        'total_expenditure': str(total_expenditure),
+        'opening_balance':   str(opening_total),
+        'closing_balance':   str(closing_total),
+        'is_balanced':       is_balanced,
+        'income_items':      income_items,
+        'expenditure_items': expenditure_items,
     }
 
 
@@ -646,3 +722,87 @@ def create_annual_trial_balance_record(fiscal_year_str, generated_by=None,
     )
 
     return tb, True
+
+def apply_savings_penalty(member, savings_account, amount, account,
+                           recorded_by, reason='', nepali_date=''):
+    """
+    Apply a penalty for missed savings deposit.
+    This is immediate income — credits the cash/bank account right away.
+    Does NOT touch the member's savings balance.
+    """
+    from .models import Penalty
+
+    amount = round2(Decimal(str(amount)))
+
+    penalty = Penalty.objects.create(
+        penalty_type     = 'savings',
+        member            = member,
+        savings_account   = savings_account,
+        amount            = amount,
+        amount_remaining  = Decimal('0.00'),  # not applicable for savings
+        reason            = reason,
+        account           = account,
+        nepali_date       = nepali_date,
+        is_paid           = True,  # immediate
+        recorded_by       = recorded_by,
+    )
+
+    # credit the account immediately
+    credit_account(
+        account=account,
+        amount=amount,
+        reference_type='penalty_income',
+        reference_id=penalty.id,
+        recorded_by=recorded_by,
+        note=f'Savings penalty — {member.full_name or member.email}' + (f' — {reason}' if reason else ''),
+        nepali_date=nepali_date,
+    )
+
+    return penalty
+
+
+def apply_loan_penalty(loan, amount, recorded_by, reason='', nepali_date=''):
+    """
+    Apply a penalty for missed EMI payment.
+    Adds to loan's amount_remaining. No immediate cash movement —
+    income is only recognized when member actually pays it back.
+    """
+    from .models import Penalty
+
+    if loan.status != 'active':
+        raise ValueError('Penalty can only be applied to active loans.')
+
+    amount = round2(Decimal(str(amount)))
+
+    penalty = Penalty.objects.create(
+        penalty_type     = 'loan',
+        member            = loan.member,
+        loan              = loan,
+        amount            = amount,
+        amount_remaining  = amount,  # full amount unpaid initially
+        reason            = reason,
+        account           = None,  # no immediate cash
+        nepali_date       = nepali_date,
+        is_paid           = False,
+        recorded_by       = recorded_by,
+    )
+
+    # increase loan outstanding
+    loan.amount_remaining = round2(loan.amount_remaining + amount)
+    loan.save()
+
+    return penalty
+
+
+def get_unpaid_loan_penalties(loan):
+    """Get total unpaid penalty amount for a loan."""
+    from .models import Penalty
+    from django.db.models import Sum
+
+    total = Penalty.objects.filter(
+        loan=loan,
+        penalty_type='loan',
+        is_paid=False,
+    ).aggregate(total=Sum('amount_remaining'))['total']
+
+    return round2(total) if total else Decimal('0.00')

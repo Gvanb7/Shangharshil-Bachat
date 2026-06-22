@@ -1,3 +1,4 @@
+from django.utils import timezone
 import uuid
 from django.db import models
 from django.conf import settings
@@ -82,7 +83,14 @@ class Loan(models.Model):
     member          = models.ForeignKey(
                           settings.AUTH_USER_MODEL,
                           on_delete=models.PROTECT,
-                          related_name='loans'
+                          related_name='loans',
+                          null = True, blank = True
+                      )
+    borrower        = models.ForeignKey(
+                          'Borrower',
+                          on_delete=models.PROTECT,
+                          related_name='loans',
+                          null = True, blank = True
                       )
     principal       = models.DecimalField(
                           max_digits=12, decimal_places=2,
@@ -125,14 +133,40 @@ class Loan(models.Model):
                        )
     created_at       = models.DateTimeField(auto_now_add=True)
     updated_at       = models.DateTimeField(auto_now=True)
-
+    first_due_date   = models.DateField(null=True, blank=True)
     class Meta:
         ordering = ['-created_at']
+        
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if not self.member and not self.borrower:
+            raise ValidationError('Loan must have either a member or a borrower.')
+        if self.member and self.borrower:
+            raise ValidationError('Loan cannot have both a member and a borrower.')
 
+    @property
+    def borrower_name(self):
+        if self.member:
+            return self.member.full_name or self.member.email
+        if self.borrower:
+            return self.borrower.full_name
+        return 'Unknown'
+
+    @property
+    def borrower_phone(self):
+        if self.member:
+            return self.member.phone
+        if self.borrower:
+            return self.borrower.phone
+        return ''
+
+    @property
+    def is_member_loan(self):
+        return self.member is not None
+        
     def __str__(self):
-        return f'Loan Rs.{self.principal} — {self.member.full_name} ({self.status})'
-
-
+        return f'Loan Rs.{self.principal} - {self.borrower_name}'
+    
 class LoanRepayment(models.Model):
     id                 = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     loan               = models.ForeignKey(
@@ -144,6 +178,7 @@ class LoanRepayment(models.Model):
                              max_digits=12, decimal_places=2,
                              validators=[MinValueValidator(Decimal('0.01'))]
                          )
+    penalty_portion    = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     principal_portion  = models.DecimalField(max_digits=12, decimal_places=2)
     interest_portion   = models.DecimalField(max_digits=12, decimal_places=2)
     balance_after      = models.DecimalField(max_digits=12, decimal_places=2)   # snapshot
@@ -155,6 +190,8 @@ class LoanRepayment(models.Model):
                          )
     paid_at            = models.DateField()
     nepali_date        = models.CharField(max_length=20, blank=True)
+    created_at         = models.DateTimeField(default = timezone.now)
+
 
     class Meta:
         ordering = ['-paid_at']
@@ -403,3 +440,97 @@ class CooperativeSettings(models.Model):
 
     def __str__(self):
         return f'Settings (Opening Equity: Rs. {self.opening_equity})'
+    
+class Penalty(models.Model):
+    PENALTY_TYPES = [
+        ('savings', 'Savings Penalty'),
+        ('loan',    'Loan Penalty'),
+    ]
+
+    id              = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    penalty_type    = models.CharField(max_length=10, choices=PENALTY_TYPES)
+    member          = models.ForeignKey(
+                          settings.AUTH_USER_MODEL,
+                          on_delete=models.CASCADE,
+                          related_name='penalties',
+                          null = True, blank = True,
+                      )
+    borrower       = models.ForeignKey(
+                            'Borrower',
+                            on_delete=models.CASCADE,
+                            null=True, blank=True,
+                            related_name='penalties'
+                        )
+    savings_account = models.ForeignKey(
+                          SavingsAccount,
+                          on_delete=models.CASCADE,
+                          null=True, blank=True,
+                          related_name='penalties'
+                      )
+    loan            = models.ForeignKey(
+                          Loan,
+                          on_delete=models.CASCADE,
+                          null=True, blank=True,
+                          related_name='penalties'
+                      )
+    amount          = models.DecimalField(
+                          max_digits=12, decimal_places=2,
+                          validators=[MinValueValidator(Decimal('0.01'))]
+                      )
+    amount_remaining = models.DecimalField(
+                          max_digits=12, decimal_places=2,
+                          default=Decimal('0.00')
+                      )  # tracks unpaid portion for loan penalties
+    reason          = models.TextField(blank=True)
+    account         = models.ForeignKey(
+                          Account,
+                          on_delete=models.SET_NULL,
+                          null=True, blank=True,
+                          related_name='penalty_collections'
+                      )  # only used for savings penalty (immediate cash)
+    nepali_date     = models.CharField(max_length=20, blank=True)
+    is_paid         = models.BooleanField(default=False)  # for loan penalty
+    recorded_by     = models.ForeignKey(
+                          settings.AUTH_USER_MODEL,
+                          on_delete=models.PROTECT,
+                          related_name='recorded_penalties'
+                      )
+    created_at      = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        
+    @property
+    def borrower_name(self):
+        if self.member:
+            return self.member.full_name or self.member.email
+        if self.borrower:
+            return self.borrower.full_name
+        return 'Unknown'
+
+    def __str__(self):
+        return f'{self.get_penalty_type_display()} Rs.{self.amount} — {self.borrower_name}'
+    
+class Borrower(models.Model):
+    """External (non-member) loan borrower."""
+    id                 = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    full_name          = models.CharField(max_length=200)
+    phone              = models.CharField(max_length=20)
+    address            = models.TextField()
+    citizenship_front  = models.ImageField(upload_to='borrowers/citizenship/')
+    citizenship_back   = models.ImageField(upload_to='borrowers/citizenship/')
+    signature          = models.ImageField(upload_to='borrowers/signatures/')
+    photo              = models.ImageField(upload_to='borrowers/photos/')
+    created_by         = models.ForeignKey(
+                             settings.AUTH_USER_MODEL,
+                             on_delete=models.SET_NULL,
+                             null=True,
+                             related_name='created_borrowers'
+                         )
+    created_at         = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['full_name']
+
+    def __str__(self):
+        return f'{self.full_name} ({self.phone})'

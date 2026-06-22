@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { path: '/admin/expenditure', label: 'Expenditure', icon: '📊' },
   { path: '/admin/income',      label:  'Income',     icon: '📈' },
   { path: '/admin/statements', label: 'Statements', icon: '📄' },
+  { path: '/admin/borrowers', label: 'Borrowers', icon: '🧑‍💼' },
 ]
 
 export default function AdminLayout({ children }) {
@@ -53,9 +54,8 @@ export default function AdminLayout({ children }) {
             className='w-16 h-16 object-contain' />
             <div>
               <p className="text-white font-semibold text-sm leading-tight">
-                Shangharshil
+                Shree Shangharshil Bachat Samuha
               </p>
-              <p className="text-primary-300 text-xs">Bachat Samuha</p>
             </div>
           </div>
           {/* Close button — mobile only */}

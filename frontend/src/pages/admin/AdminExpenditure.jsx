@@ -3,11 +3,12 @@ import AdminLayout from '../../components/AdminLayout'
 import api from '../../lib/api'
 import { toBS } from '../../lib/nepaliDate'
 import BSDatePicker from '../../components/BSDatePicker'
+import FiscalYearDatePicker from '../../components/FiscalYearDatePicker'
 import useAccounts from '../../hooks/useAccounts'
 
 const EMPTY_FORM = {
   category: '', amount: '', description: '', expense_date: '', account_id: '',
-  nepali_date: '',
+  nepali_date: '', fiscal_year: '',
 }
 
 export default function AdminExpenditure() {
@@ -61,23 +62,37 @@ export default function AdminExpenditure() {
     setTimeout(() => setSuccessMsg(''), 3000)
   }
 
-  function openAdd() {
+  async function openAdd() {
     setEditItem(null)
+    let currentFY = ''
+    try {
+      const res = await api.get('/fiscal-years/current/')
+      currentFY = res.data.fiscal_year
+    } catch {}
     setForm({
       ...EMPTY_FORM,
       expense_date: new Date().toISOString().split('T')[0],
+      fiscal_year: currentFY,
     })
     setFormErr('')
     setShowForm(true)
   }
 
-  function openEdit(item) {
+  async function openEdit(item) {
     setEditItem(item)
+    let currentFY = ''
+    try {
+      const res = await api.get('/fiscal-years/current/')
+      currentFY = res.data.fiscal_year
+    } catch {}
     setForm({
       category:     item.category,
       amount:       item.amount,
       description:  item.description,
       expense_date: item.expense_date,
+      account_id:   item.account_id || '',
+      nepali_date:  item.nepali_date || '',
+      fiscal_year:  item.fiscal_year || currentFY,
     })
     setFormErr('')
     setShowForm(true)
@@ -450,6 +465,14 @@ export default function AdminExpenditure() {
                 </div>
               )}
 
+              <FiscalYearDatePicker
+                fiscalYear={form.fiscal_year}
+                onFiscalYearChange={(fy) => setForm({ ...form, fiscal_year: fy })}
+                dateValue={form.nepali_date}
+                onDateChange={(val) => setForm({ ...form, nepali_date: val })}
+                required
+              />
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Category <span className="text-red-500">*</span>
@@ -468,7 +491,7 @@ export default function AdminExpenditure() {
                   type="button"
                   onClick={() => { closeForm(); setShowCatPanel(true) }}
                   className="text-xs text-primary-600 hover:text-primary-700
-                             mt-1 underline">
+                            mt-1 underline">
                   + Add new category
                 </button>
               </div>
@@ -505,17 +528,6 @@ export default function AdminExpenditure() {
                     </option>
                   ))}
                 </select>
-              </div>
-
-              <div className="relative z-50 overflow-visible">
-                <BSDatePicker
-                  label="Date (BS)"
-                  value={form.nepali_date}
-                  onChange={(val) =>
-                    setForm({ ...form, nepali_date: val })
-                  }
-                  required
-                />
               </div>
 
               <div>

@@ -6,12 +6,14 @@ from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import Q, Sum
+from rest_framework.parsers import MultiPartParser, FormParser
 
 from accounts.permissions import IsAdmin, IsMember
 from .models import (
     SavingsAccount, SavingsTransaction, Loan, LoanRepayment, 
     Expenditure, ExpenditureCategory, Income, IncomeCategory, Account, AccountTransaction,
-    TrialBalance, CooperativeSettings,
+    TrialBalance, CooperativeSettings, Penalty, Borrower
 )
 from .serializers import (
     SavingsAccountSerializer, SavingsTransactionSerializer, 
@@ -19,17 +21,19 @@ from .serializers import (
     RepaymentInputSerializer, ExpenditureSerializer,
     ExpenditureCategorySerializer, IncomeSerializer, IncomeCategorySerializer, 
     AccountSerializer, AccountTransactionSerializer, 
-    TrialBalanceSerializer, CooperativeSettingsSerializer,
+    TrialBalanceSerializer, CooperativeSettingsSerializer, PenaltySerializer, BorrowerSerializer
 )
 
 from .services import (
     deposit_to_savings, withdraw_from_savings, apply_interest_to_account, disburse_loan, record_loan_repayment,
     generate_loan_schedule, credit_account, debit_account, transfer_between_accounts, 
     get_statement_data, create_trial_balance_record, create_annual_trial_balance_record,
+    apply_savings_penalty, apply_loan_penalty 
 )
 
 from .bs_calendar import (
     get_bs_month_name, today_bs, get_fiscal_year, BS_MONTHS,
+    get_available_fiscal_years, get_fiscal_year_months
 )
 
 User = get_user_model()
@@ -298,19 +302,44 @@ class AdminLoanDetailView(APIView):
         return Response(serializer.errors, status=400)
     
 class AdminApproveLoanView(APIView):
-    """Admin approves a pending loan."""
     permission_classes = [IsAdmin]
 
-    @transaction.atomic
     def post(self, request, loan_id):
         loan = get_object_or_404(Loan, id=loan_id, status='pending')
-        loan.status      = 'approved'
-        loan.approved_by = request.user
+
+        interest_rate   = request.data.get('interest_rate')
+        term_months     = request.data.get('term_months')
+        first_due_date  = request.data.get('first_due_date')  # BS date string
+
+        if not interest_rate or not term_months:
+            return Response(
+                {'error': 'Interest rate and term are required.'},
+                status=400
+            )
+        if not first_due_date:
+            return Response(
+                {'error': 'First due date is required.'},
+                status=400
+            )
+            
+        from .bs_calendar import bs_to_ad
+        try:
+            parts = first_due_date.split('-')
+            bs_year, bs_month, bs_day = int(parts[0]), int(parts[1]), int(parts[2])
+            ad_due_date = bs_to_ad(bs_year, bs_month, bs_day)
+        except (ValueError, IndexError):
+            return Response(
+                {'error': 'Invalid due date format. Expected YYYY-MM-DD (BS).'},
+                status=400
+            )
+
+        loan.interest_rate  = Decimal(str(interest_rate))
+        loan.term_months    = int(term_months)
+        loan.first_due_date = first_due_date  # store BS date string or convert to AD
+        loan.status         = 'approved'
         loan.save()
-        return Response({
-            'message': 'Loan approved.',
-            'loan':    LoanSerializer(loan).data,
-        })
+
+        return Response(LoanSerializer(loan).data)
         
 class AdminRejectLoanView(APIView):
     """Admin rejects a pending loan."""
@@ -329,9 +358,8 @@ class AdminDisburseLoanView(APIView):
 
     @transaction.atomic
     def post(self, request, loan_id):
-        loan     = get_object_or_404(Loan, id=loan_id, status='approved')
-        acct_id  = request.data.get('account_id')
-        nep_date = request.data.get('nepali_date', '')
+        loan    = get_object_or_404(Loan, id=loan_id, status='approved')
+        acct_id = request.data.get('account_id')
 
         if not acct_id:
             return Response(
@@ -346,17 +374,23 @@ class AdminDisburseLoanView(APIView):
 
         try:
             from django.utils import timezone
+            from .bs_calendar import today_bs, get_bs_month_name
+
+            # auto-set nepali date from today
+            y, m, d   = today_bs()
+            nep_date  = f'{y}-{str(m).zfill(2)}-{str(d).zfill(2)}'
+
             disbursed_on = timezone.now().date()
             disburse_loan(loan, disbursed_on)
 
             debit_account(
-                account=cash_account,
-                amount=loan.principal,
-                reference_type='loan_disbursement',
-                reference_id=loan.id,
-                recorded_by=request.user,
-                note=f'Loan disbursement — {loan.member.full_name or loan.member.email}',
-                nepali_date=nep_date,
+                account        = cash_account,
+                amount         = loan.principal,
+                reference_type = 'loan_disbursement',
+                reference_id   = loan.id,
+                recorded_by    = request.user,
+                note           = f'Loan disbursement — {loan.borrower_name}',
+                nepali_date    = nep_date,
             )
             return Response(LoanSerializer(loan).data)
         except ValueError as e:
@@ -399,7 +433,7 @@ class AdminRecordRepaymentView(APIView):
                     reference_type='loan_repayment',
                     reference_id=repayment.id,
                     recorded_by=request.user,
-                    note=f'Loan repayment — {loan.member.full_name or loan.member.email}',
+                    note=f'Loan repayment — {loan.borrower_name}',
                     nepali_date=nep_date,
                 )
                 return Response(
@@ -1009,3 +1043,254 @@ class AdminCooperativeSettingsView(APIView):
             return Response(CooperativeSettingsSerializer(obj).data)
         except Exception as e:
             return Response({'error': str(e)}, status=400)
+        
+class AdminApplySavingsPenaltyView(APIView):
+    permission_classes = [IsAdmin]
+
+    @transaction.atomic
+    def post(self, request, account_id):
+        savings_account = get_object_or_404(SavingsAccount, id=account_id)
+        amount      = request.data.get('amount')
+        reason      = request.data.get('reason', '')
+        acct_id     = request.data.get('account_id')
+        nepali_date = request.data.get('nepali_date', '')
+
+        if not amount:
+            return Response({'error': 'Amount is required.'}, status=400)
+        if not acct_id:
+            return Response(
+                {'error': 'Please select an account to collect the penalty.'},
+                status=400
+            )
+        if not nepali_date:
+            return Response({'error': 'Date is required.'}, status=400)
+
+        try:
+            cash_account = Account.objects.get(id=acct_id, is_active=True)
+        except Account.DoesNotExist:
+            return Response({'error': 'Selected account not found.'}, status=400)
+
+        try:
+            penalty = apply_savings_penalty(
+                member          = savings_account.member,
+                savings_account = savings_account,
+                amount          = amount,
+                account         = cash_account,
+                recorded_by     = request.user,
+                reason          = reason,
+                nepali_date     = nepali_date,
+            )
+            return Response(PenaltySerializer(penalty).data, status=201)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=400)
+
+
+class AdminApplyLoanPenaltyView(APIView):
+    permission_classes = [IsAdmin]
+
+    @transaction.atomic
+    def post(self, request, loan_id):
+        loan        = get_object_or_404(Loan, id=loan_id)
+        amount      = request.data.get('amount')
+        reason      = request.data.get('reason', '')
+        nepali_date = request.data.get('nepali_date', '')
+
+        if not amount:
+            return Response({'error': 'Amount is required.'}, status=400)
+        if not nepali_date:
+            return Response({'error': 'Date is required.'}, status=400)
+
+        try:
+            penalty = apply_loan_penalty(
+                loan        = loan,
+                amount      = amount,
+                recorded_by = request.user,
+                reason      = reason,
+                nepali_date = nepali_date,
+            )
+            return Response(PenaltySerializer(penalty).data, status=201)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=400)
+
+
+class MemberPenaltyListView(APIView):
+    """Member views their own penalties."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        penalties = Penalty.objects.filter(member=request.user)
+        return Response(PenaltySerializer(penalties, many=True).data)
+
+
+class AdminPenaltyListView(APIView):
+    """Admin views all penalties, optionally filtered by loan or savings account."""
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        penalties = Penalty.objects.all()
+        loan_id = request.query_params.get('loan')
+        sav_id  = request.query_params.get('savings_account')
+        if loan_id:
+            penalties = penalties.filter(loan_id=loan_id)
+        if sav_id:
+            penalties = penalties.filter(savings_account_id=sav_id)
+        return Response(PenaltySerializer(penalties, many=True).data)
+    
+class FiscalYearListView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        years = get_available_fiscal_years()
+        return Response({'fiscal_years': years})
+
+
+class FiscalYearMonthsView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        fy_string = request.query_params.get('fy')
+        if not fy_string:
+            return Response({'error': 'fy parameter is required.'}, status=400)
+        try:
+            months = get_fiscal_year_months(fy_string)
+            return Response({
+                'months': [
+                    {'bs_year': y, 'bs_month': m, 'month_name': name}
+                    for y, m, name in months
+                ]
+            })
+        except Exception as e:
+            return Response({'error': str(e)}, status=400)
+        
+class CurrentFiscalYearView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        from .bs_calendar import today_bs, get_fiscal_year
+        y, m, _ = today_bs()
+        return Response({'fiscal_year': get_fiscal_year(y, m)})
+    
+class AdminBorrowerListCreateView(APIView):
+    permission_classes = [IsAdmin]
+    parser_classes     = [MultiPartParser, FormParser]
+
+    def get(self, request):
+        search = request.query_params.get('search', '').strip()
+        borrowers = Borrower.objects.all()
+        if search:
+            borrowers = borrowers.filter(
+                Q(full_name__icontains=search) | Q(phone__icontains=search)
+            )
+        return Response(
+            BorrowerSerializer(borrowers, many=True, context={'request': request}).data
+        )
+
+    def post(self, request):
+        full_name = request.data.get('full_name', '').strip()
+        phone     = request.data.get('phone', '').strip()
+        address   = request.data.get('address', '').strip()
+
+        citizenship_front = request.FILES.get('citizenship_front')
+        citizenship_back  = request.FILES.get('citizenship_back')
+        signature          = request.FILES.get('signature')
+        photo               = request.FILES.get('photo')
+
+        if not full_name:
+            return Response({'error': 'Full name is required.'}, status=400)
+        if not phone:
+            return Response({'error': 'Phone is required.'}, status=400)
+        if not address:
+            return Response({'error': 'Address is required.'}, status=400)
+        if not citizenship_front:
+            return Response({'error': 'Citizenship front photo is required.'}, status=400)
+        if not citizenship_back:
+            return Response({'error': 'Citizenship back photo is required.'}, status=400)
+        if not signature:
+            return Response({'error': 'Signature photo is required.'}, status=400)
+        if not photo:
+            return Response({'error': 'Passport-size photo is required.'}, status=400)
+
+        allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+        for label, file in [
+            ('Citizenship front', citizenship_front),
+            ('Citizenship back',  citizenship_back),
+            ('Signature',          signature),
+            ('Photo',                photo),
+        ]:
+            if file.content_type not in allowed_types:
+                return Response(
+                    {'error': f'{label}: only JPEG, PNG or WebP allowed.'},
+                    status=400
+                )
+            if file.size > 5 * 1024 * 1024:
+                return Response(
+                    {'error': f'{label}: file size must be less than 5MB.'},
+                    status=400
+                )
+
+        borrower = Borrower.objects.create(
+            full_name          = full_name,
+            phone              = phone,
+            address            = address,
+            citizenship_front  = citizenship_front,
+            citizenship_back   = citizenship_back,
+            signature           = signature,
+            photo                = photo,
+            created_by           = request.user,
+        )
+
+        return Response(
+            BorrowerSerializer(borrower, context={'request': request}).data,
+            status=201
+        )
+
+class AdminBorrowerDetailView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request, borrower_id):
+        borrower = get_object_or_404(Borrower, id=borrower_id)
+        return Response(
+            BorrowerSerializer(borrower, context={'request': request}).data
+        )
+        
+class AdminCreateBorrowerLoanView(APIView):
+    permission_classes = [IsAdmin]
+
+    def post(self, request):
+        borrower_id     = request.data.get('borrower_id')
+        principal       = request.data.get('principal')
+        purpose         = request.data.get('purpose', '')
+        interest_rate   = request.data.get('interest_rate')
+        term_months     = request.data.get('term_months')
+        first_due_date  = request.data.get('first_due_date')  # BS string
+
+        if not borrower_id:
+            return Response({'error': 'Borrower is required.'}, status=400)
+        if not principal or Decimal(str(principal)) <= 0:
+            return Response({'error': 'Valid principal amount is required.'}, status=400)
+        if not interest_rate:
+            return Response({'error': 'Interest rate is required.'}, status=400)
+        if not term_months:
+            return Response({'error': 'Term (months) is required.'}, status=400)
+        if not first_due_date:
+            return Response({'error': 'First due date is required.'}, status=400)
+
+        borrower = get_object_or_404(Borrower, id=borrower_id)
+
+        from .bs_calendar import bs_to_ad
+        parts = first_due_date.split('-')
+        ad_due_date = bs_to_ad(int(parts[0]), int(parts[1]), int(parts[2]))
+
+        loan = Loan.objects.create(
+            borrower         = borrower,
+            member            = None,
+            principal         = Decimal(str(principal)),
+            purpose            = purpose,
+            interest_rate      = Decimal(str(interest_rate)),
+            term_months         = int(term_months),
+            first_due_date       = ad_due_date,
+            status                = 'approved',   # skips pending — admin-created
+            amount_remaining      = Decimal(str(principal)),
+        )
+
+        return Response(LoanSerializer(loan).data, status=201)

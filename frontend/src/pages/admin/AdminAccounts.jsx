@@ -3,6 +3,7 @@ import AdminLayout from '../../components/AdminLayout'
 import api from '../../lib/api'
 import { toBS, formatBS } from '../../lib/nepaliDate'
 import BSDatePicker from '../../components/BSDatePicker'
+import FiscalYearDatePicker from '../../components/FiscalYearDatePicker'
 
 const ACCOUNT_TYPES = [
   { value: 'cash',    label: 'Cash'           },
@@ -13,7 +14,7 @@ const ACCOUNT_TYPES = [
 
 const EMPTY_FORM = {
   name: '', account_type: 'cash', bank_name: '',
-  account_number: '', branch: '', opening_balance: '0',
+  account_number: '', branch: '', opening_balance: '0', 
 }
 
 export default function AdminAccounts() {
@@ -34,14 +35,15 @@ export default function AdminAccounts() {
 
   const [showAdjust,  setShowAdjust]  = useState(false)
   const [adjForm,     setAdjForm]     = useState({
-    type: 'add', amount: '', note: '', nepali_date: ''
+    type: 'add', amount: '', note: '', nepali_date: '', fiscal_year: ''
   })
   const [adjErr,      setAdjErr]      = useState('')
   const [adjLoad,     setAdjLoad]     = useState(false)
 
   const [showTransfer, setShowTransfer] = useState(false)
   const [transferForm, setTransferForm] = useState({
-    from_account: '', to_account: '', amount: '', note: '', nepali_date: ''
+    from_account: '', to_account: '', amount: '', note: '', nepali_date: '',
+    fiscal_year: ''
   })
   const [transferErr,  setTransferErr]  = useState('')
   const [transferLoad, setTransferLoad] = useState(false)
@@ -154,7 +156,7 @@ export default function AdminAccounts() {
       )
       flash(`Balance ${adjForm.type === 'add' ? 'increased' : 'reduced'} successfully.`)
       setShowAdjust(false)
-      setAdjForm({ type: 'add', amount: '', note: '', nepali_date: '' })
+      setAdjForm({ type: 'add', amount: '', note: '', nepali_date: '', fiscal_year: '' })
       setSelected(res.data)
       fetchAccounts()
       fetchTxns(selected.id)
@@ -228,12 +230,17 @@ export default function AdminAccounts() {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => {
+              onClick={async () => {
                 setTransferErr('')
+                let currentFY = ''
+                try {
+                  const res = await api.get('/fiscal-years/current/')
+                  currentFY = res.data.fiscal_year
+                } catch {}
                 setTransferForm({
                   from_account: '', to_account: '',
-                  amount: '', note: '', nepali_date: ''
-                })
+                  amount: '', note: '', nepali_date: '', fiscal_year: currentFY
+                })  
                 setShowTransfer(true)
               }}
               className="btn-secondary text-sm">
@@ -330,16 +337,21 @@ export default function AdminAccounts() {
                   </button>
                   <span className="text-gray-300">|</span>
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       selectAccount(acc)
+                      let currentFY = ''
+                      try {
+                        const res = await api.get('/fiscal-years/current/')
+                        currentFY = res.data.fiscal_year
+                      } catch {}
                       setAdjForm({
-                        type: 'add', amount: '', note: '', nepali_date: ''
+                        type: 'add', amount: '', note: '', nepali_date: '', fiscal_year: currentFY
                       })
                       setAdjErr('')
                       setShowAdjust(true)
                     }}
                     className="text-xs text-yellow-600
-                               hover:text-yellow-800 font-medium">
+                              hover:text-yellow-800 font-medium">
                     Adjust balance
                   </button>
                 </div>
@@ -645,6 +657,14 @@ export default function AdminAccounts() {
                 </p>
               </div>
 
+              <FiscalYearDatePicker
+                fiscalYear={adjForm.fiscal_year}
+                onFiscalYearChange={(fy) => setAdjForm({ ...adjForm, fiscal_year: fy })}
+                dateValue={adjForm.nepali_date}
+                onDateChange={(val) => setAdjForm({ ...adjForm, nepali_date: val })}
+                required
+              />
+
               <div>
                 <label className="block text-sm font-medium
                                   text-gray-700 mb-1">
@@ -693,23 +713,6 @@ export default function AdminAccounts() {
               <div>
                 <label className="block text-sm font-medium
                                   text-gray-700 mb-1">
-                  Date (BS) <span className="text-red-500">*</span>
-                </label>
-                <BSDatePicker
-                  value={adjForm.nepali_date}
-                  onChange={(val) =>
-                    setAdjForm({
-                      ...adjForm,
-                      nepali_date: val,
-                    })
-                  }
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium
-                                  text-gray-700 mb-1">
                   Note
                 </label>
                 <input
@@ -722,7 +725,6 @@ export default function AdminAccounts() {
                   })}
                 />
               </div>
-
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
@@ -755,7 +757,7 @@ export default function AdminAccounts() {
 
       {/* Transfer modal */}
       {showTransfer && (
-         <div className="fixed inset-0 z-50 bg-black/40 overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/40 overflow-y-auto">
           <div className="min-h-screen flex justify-center p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-8">
 
@@ -777,6 +779,14 @@ export default function AdminAccounts() {
                   {transferErr}
                 </div>
               )}
+
+              <FiscalYearDatePicker
+                fiscalYear={transferForm.fiscal_year}
+                onFiscalYearChange={(fy) => setTransferForm({ ...transferForm, fiscal_year: fy })}
+                dateValue={transferForm.nepali_date}
+                onDateChange={(val) => setTransferForm({ ...transferForm, nepali_date: val })}
+                required
+              />
 
               <div>
                 <label className="block text-sm font-medium
@@ -844,23 +854,6 @@ export default function AdminAccounts() {
               <div>
                 <label className="block text-sm font-medium
                                   text-gray-700 mb-1">
-                  Date (BS) <span className="text-red-500">*</span>
-                </label>
-                 <BSDatePicker
-                    value={transferForm.nepali_date}
-                    onChange={(val) =>
-                      setTransferForm({
-                        ...transferForm,
-                        nepali_date: val,
-                      })
-                    }
-                    required
-                  />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium
-                                  text-gray-700 mb-1">
                   Note (optional)
                 </label>
                 <input
@@ -893,7 +886,6 @@ export default function AdminAccounts() {
         </div>
         </div>
       )}
-
     </AdminLayout>
   )
 }

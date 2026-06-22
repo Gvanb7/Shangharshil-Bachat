@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import AdminLayout from '../../components/AdminLayout'
 import api from '../../lib/api'
 import NepaliDatePicker from '../../components/NepaliDatePicker'
 import { toBS, formatBS } from '../../lib/nepaliDate'
 import BSDatePicker from '../../components/BSDatePicker'
+import FiscalYearDatePicker from '../../components/FiscalYearDatePicker'
 import useAccounts from '../../hooks/useAccounts'
 
 const EMPTY_LOAN_FORM = {
@@ -34,17 +35,44 @@ export default function AdminLoans() {
   const [showApproveModal, setShowApproveModal] = useState(false)
   const [approveTarget,    setApproveTarget]    = useState(null)
   const [approveForm,      setApproveForm]      = useState({
-    interest_rate: '12.00', term_months: '12'
+    interest_rate: '12.00', term_months: '12', fiscal_year: '', 
+    first_due_date: '',
   })
   const [approveErr,  setApproveErr]  = useState('')
   const [approveLoad, setApproveLoad] = useState(false)
   const [showDisburse,  setShowDisburse]  = useState(false)
   const [disburseTarget,setDisburseTarget]= useState(null)
   const [disburseForm,  setDisburseForm]  = useState({
-    account_id: '', nepali_date: ''
+    account_id: ''
   })
   const [disburseErr,  setDisburseErr]  = useState('')
   const [disburseLoad, setDisburseLoad] = useState(false)
+
+  const [showBorrowerLoan,   setShowBorrowerLoan]   = useState(false)
+  const [borrowerStep,       setBorrowerStep]        = useState('select')  // 'select' | 'new' | 'terms'
+  const [borrowerSearch,     setBorrowerSearch]      = useState('')
+  const [borrowerResults,    setBorrowerResults]     = useState([])
+  const [borrowerSearchLoad, setBorrowerSearchLoad]  = useState(false)
+  const [selectedBorrower,   setSelectedBorrower]    = useState(null)
+
+  const [newBorrowerForm,    setNewBorrowerForm]     = useState({
+    full_name: '', phone: '', address: ''
+  })
+  const [newBorrowerFiles,   setNewBorrowerFiles]    = useState({
+    citizenship_front: null, citizenship_back: null,
+    signature: null, photo: null,
+  })
+  const [newBorrowerPreviews, setNewBorrowerPreviews] = useState({
+    citizenship_front: null, citizenship_back: null,
+    signature: null, photo: null,
+  })
+
+  const [borrowerLoanForm, setBorrowerLoanForm] = useState({
+    principal: '', purpose: '', interest_rate: '', term_months: '',
+    fiscal_year: '', first_due_date: '',
+  })
+  const [borrowerLoanErr,  setBorrowerLoanErr]  = useState('')
+  const [borrowerLoanLoad, setBorrowerLoanLoad] = useState(false)
 
   useEffect(() => { fetchAll() }, [])
 
@@ -143,32 +171,41 @@ export default function AdminLoans() {
     setShowApproveModal(true)
   }
 
-  async function submitApprove(e) {
-    e.preventDefault()
-    setApproveErr('')
-    setApproveLoad(true)
-    try {
-      // first update the loan terms
-      await api.patch(`/loans/${approveTarget.id}/`, {
-        interest_rate: approveForm.interest_rate,
-        term_months:   parseInt(approveForm.term_months),
-      })
-      // then approve
-      await api.post(`/loans/${approveTarget.id}/approve/`)
-      flash('Loan approved.')
-      setShowApproveModal(false)
-      setApproveTarget(null)
-      fetchAll()
-      if (selected?.id === approveTarget.id) {
-        const res = await api.get(`/loans/${approveTarget.id}/`)
-        setSelected(res.data)
+    async function submitApprove(e) {
+      e.preventDefault()
+      setApproveErr('')
+
+      if (!approveForm.fiscal_year) {
+        setApproveErr('Please select a fiscal year.')
+        return
       }
-    } catch (err) {
-      setApproveErr(err.response?.data?.error || 'Failed to approve loan.')
-    } finally {
-      setApproveLoad(false)
+      if (!approveForm.first_due_date) {
+        setApproveErr('Please select the first due date.')
+        return
+      }
+
+      setApproveLoad(true)
+      try {
+        await api.post(`/loans/${approveTarget.id}/approve/`, {
+          interest_rate:  approveForm.interest_rate,
+          term_months:    approveForm.term_months,
+          fiscal_year:    approveForm.fiscal_year,
+          first_due_date: approveForm.first_due_date,
+        })
+        flash('Loan approved successfully.')
+        setShowApproveModal(false)
+        setApproveTarget(null)
+        fetchAll()
+        if (selected?.id === approveTarget.id) {
+          const res = await api.get(`/loans/${approveTarget.id}/`)
+          setSelected(res.data)
+        }
+      } catch (err) {
+        setApproveErr(err.response?.data?.error || 'Failed to approve loan.')
+      } finally {
+        setApproveLoad(false)
+      }
     }
-  }
 
   async function handleReject(loan) {
     if (!window.confirm(
@@ -189,7 +226,7 @@ export default function AdminLoans() {
 
   function handleDisburse(loan) {
   setDisburseTarget(loan)
-  setDisburseForm({ account_id: '', nepali_date: '' })
+  setDisburseForm({ account_id: '', nepali_date: '', fiscal_year: '' })
   setDisburseErr('')
   setShowDisburse(true)
   }
@@ -199,10 +236,6 @@ export default function AdminLoans() {
     setDisburseErr('')
     if (!disburseForm.account_id) {
       setDisburseErr('Please select an account.')
-      return
-    }
-    if (!disburseForm.nepali_date) {
-      setDisburseErr('Please enter the date.')
       return
     }
     setDisburseLoad(true)
@@ -219,6 +252,142 @@ export default function AdminLoans() {
       setDisburseErr(err.response?.data?.error || 'Failed to disburse loan.')
     } finally {
       setDisburseLoad(false)
+    }
+  }
+
+  function openBorrowerLoanFlow() {
+    setBorrowerStep('select')
+    setBorrowerSearch('')
+    setBorrowerResults([])
+    setSelectedBorrower(null)
+    setNewBorrowerForm({ full_name: '', phone: '', address: '' })
+    setNewBorrowerFiles({ citizenship_front: null, citizenship_back: null, signature: null, photo: null })
+    setNewBorrowerPreviews({ citizenship_front: null, citizenship_back: null, signature: null, photo: null })
+    setBorrowerLoanForm({
+      principal: '', purpose: '', interest_rate: '', term_months: '',
+      fiscal_year: '', first_due_date: '',
+    })
+    setBorrowerLoanErr('')
+    setShowBorrowerLoan(true)
+    setTimeout(() => searchBorrowers(''), 0)
+  }
+
+  async function searchBorrowers(query) {
+    const q = query !== undefined ? query : borrowerSearch
+    setBorrowerSearchLoad(true)
+    try {
+      const res = await api.get(`/borrowers/?search=${q}`)
+      setBorrowerResults(res.data)
+    } catch {
+      setBorrowerResults([])
+    } finally {
+      setBorrowerSearchLoad(false)
+    }
+  }
+
+  function pickExistingBorrower(borrower) {
+    setSelectedBorrower(borrower)
+    setBorrowerStep('terms')
+    setBorrowerLoanErr('')
+    //prefill fiscal year with current FY
+    api.get('/fiscal-years/current/')
+      .then(res => setBorrowerLoanForm(prev => ({
+        ...prev, fiscal_year: res.data.fiscal_year
+      })))
+      .catch(() => {})
+  }
+
+  function handleNewBorrowerFile(key, file) {
+    if (!file) return
+    setNewBorrowerFiles(prev => ({ ...prev, [key]: file }))
+    setNewBorrowerPreviews(prev => ({ ...prev, [key]: URL.createObjectURL(file) }))
+  }
+
+  async function submitNewBorrower(e) {
+    e.preventDefault()
+    setBorrowerLoanErr('')
+
+    if (!newBorrowerFiles.citizenship_front || !newBorrowerFiles.citizenship_back ||
+        !newBorrowerFiles.signature || !newBorrowerFiles.photo) {
+      setBorrowerLoanErr('All documents are required.')
+      return
+    }
+
+    setBorrowerLoanLoad(true)
+    try {
+      const fd = new FormData()
+      fd.append('full_name', newBorrowerForm.full_name)
+      fd.append('phone',     newBorrowerForm.phone)
+      fd.append('address',   newBorrowerForm.address)
+      fd.append('citizenship_front', newBorrowerFiles.citizenship_front)
+      fd.append('citizenship_back',  newBorrowerFiles.citizenship_back)
+      fd.append('signature',          newBorrowerFiles.signature)
+      fd.append('photo',                newBorrowerFiles.photo)
+
+      const res = await api.post('/borrowers/', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      setSelectedBorrower(res.data)
+      setBorrowerStep('terms')
+      // pre-fill current fiscal year
+      api.get('/fiscal-years/current/')
+        .then(r => setBorrowerLoanForm(prev => ({
+          ...prev, fiscal_year: r.data.fiscal_year
+        })))
+        .catch(() => {})
+    } catch (err) {
+      setBorrowerLoanErr(err.response?.data?.error || 'Failed to add borrower.')
+    } finally {
+      setBorrowerLoanLoad(false)
+    }
+  }
+
+  async function submitBorrowerLoan(e) {
+    e.preventDefault()
+    setBorrowerLoanErr('')
+
+    if (!selectedBorrower) {
+      setBorrowerLoanErr('No borrower selected.')
+      return
+    }
+    if (!borrowerLoanForm.fiscal_year) {
+      setBorrowerLoanErr('Please select a fiscal year.')
+      return
+    }
+    if (!borrowerLoanForm.first_due_date) {
+      setBorrowerLoanErr('Please select the first due date.')
+      return
+    }
+    if (!borrowerLoanForm.principal || parseFloat(borrowerLoanForm.principal) <= 0) {
+      setBorrowerLoanErr('Enter a valid principal amount.')
+      return
+    }
+    if (!borrowerLoanForm.interest_rate) {
+      setBorrowerLoanErr('Interest rate is required.')
+      return
+    }
+    if (!borrowerLoanForm.term_months) {
+      setBorrowerLoanErr('Term (months) is required.')
+      return
+    }
+
+    setBorrowerLoanLoad(true)
+    try {
+      await api.post('/loans/borrower/create/', {
+        borrower_id:     selectedBorrower.id,
+        principal:       borrowerLoanForm.principal,
+        purpose:         borrowerLoanForm.purpose,
+        interest_rate:   borrowerLoanForm.interest_rate,
+        term_months:     borrowerLoanForm.term_months,
+        first_due_date:  borrowerLoanForm.first_due_date,
+      })
+      flash('Loan created for borrower. You can now disburse it.')
+      setShowBorrowerLoan(false)
+      fetchAll()
+    } catch (err) {
+      setBorrowerLoanErr(err.response?.data?.error || 'Failed to create loan.')
+    } finally {
+      setBorrowerLoanLoad(false)
     }
   }
 
@@ -267,7 +436,12 @@ export default function AdminLoans() {
           <button
             onClick={() => setShowCreate(true)}
             className="btn-primary text-sm">
-            + New loan
+            + Member Loan
+          </button>
+          <button
+            onClick={openBorrowerLoanFlow}
+            className="btn-primary text-sm">
+            + Non-member Loan
           </button>
         </div>
 
@@ -563,22 +737,26 @@ export default function AdminLoans() {
               )}
             </div>
 
+            <FiscalYearDatePicker
+              fiscalYear={approveForm.fiscal_year}
+              onFiscalYearChange={(fy) => setApproveForm({ ...approveForm, fiscal_year: fy })}
+              dateValue={approveForm.first_due_date}
+              onDateChange={(val) => setApproveForm({ ...approveForm, first_due_date: val })}
+              dateLabel="Select first due date"  
+              required
+            />
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Interest rate (%) <span className="text-red-500">*</span>
+                  Interest rate (% p.a.) <span className="text-red-500">*</span>
                 </label>
                 <input
-                  type="number"
-                  step="0.01"
-                  min="0"
+                  type="number" step="0.01" min="0"
                   className="input-field"
                   value={approveForm.interest_rate}
-                  onChange={(e) => setApproveForm({
-                    ...approveForm, interest_rate: e.target.value
-                  })}
+                  onChange={(e) => setApproveForm({ ...approveForm, interest_rate: e.target.value })}
                   required
-                  autoFocus
                 />
               </div>
               <div>
@@ -586,14 +764,10 @@ export default function AdminLoans() {
                   Term (months) <span className="text-red-500">*</span>
                 </label>
                 <input
-                  type="number"
-                  min="1"
-                  max="360"
+                  type="number" min="1"
                   className="input-field"
                   value={approveForm.term_months}
-                  onChange={(e) => setApproveForm({
-                    ...approveForm, term_months: e.target.value
-                  })}
+                  onChange={(e) => setApproveForm({ ...approveForm, term_months: e.target.value })}
                   required
                 />
               </div>
@@ -645,20 +819,6 @@ export default function AdminLoans() {
               </select>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Disbursement date (BS) <span className="text-red-500">*</span>
-              </label>
-              <BSDatePicker
-                label="Disbursement date (BS)"
-                value={disburseForm.nepali_date}
-                onChange={(val) => setDisburseForm({
-                  ...disburseForm, nepali_date: val
-                })}
-                required
-              />
-            </div>
-
             <ModalButtons
               onCancel={() => setShowDisburse(false)}
               loading={disburseLoad}
@@ -668,6 +828,250 @@ export default function AdminLoans() {
         </Modal>
       )}
 
+      {showBorrowerLoan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center
+                        bg-black bg-opacity-40 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg
+                          max-h-[90vh] overflow-y-auto">
+
+            <div className="px-6 py-4 border-b border-gray-200 flex
+                            items-center justify-between sticky top-0 bg-white z-10">
+              <h3 className="font-semibold text-gray-800">
+                Issue loan to non-member
+              </h3>
+              <button onClick={() => setShowBorrowerLoan(false)}
+                className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+
+            <div className="px-6 py-5">
+              {borrowerLoanErr && (
+                <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200
+                                text-red-700 rounded-lg text-sm">
+                  {borrowerLoanErr}
+                </div>
+              )}
+
+              {/* Step 1a — search/select existing borrower */}
+              {borrowerStep === 'select' && (
+                <div className="space-y-4">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      className="input-field flex-1"
+                      placeholder="Search by name or phone..."
+                      value={borrowerSearch}
+                      onChange={(e) => {
+                        setBorrowerSearch(e.target.value)
+                        searchBorrowers(e.target.value)
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>searchBorrowers(borrowerSearch)}
+                      className="btn-secondary text-sm px-4">
+                      Search
+                    </button>
+                  </div>
+
+                  <div className="max-h-60 overflow-y-auto space-y-1.5">
+                    {borrowerSearchLoad ? (
+                      <p className="text-sm text-gray-400 text-center py-4">
+                        Searching...
+                      </p>
+                    ) : borrowerResults.length === 0 ? (
+                      <p className="text-sm text-gray-400 text-center py-4">
+                        No results. Search above or add a new borrower.
+                      </p>
+                    ) : borrowerResults.map(b => (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => pickExistingBorrower(b)}
+                        className="w-full text-left px-3 py-2.5 rounded-lg
+                                  border border-gray-200 hover:border-primary-400
+                                  hover:bg-primary-50 transition-colors flex
+                                  items-center gap-3">
+                        {b.photo_url ? (
+                          <img src={b.photo_url} alt={b.full_name}
+                            className="w-9 h-9 rounded-full object-cover" />
+                        ) : (
+                          <div className="w-9 h-9 rounded-full bg-gray-100" />
+                        )}
+                        <div>
+                          <p className="text-sm font-medium text-gray-800">
+                            {b.full_name}
+                          </p>
+                          <p className="text-xs text-gray-500">{b.phone}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setBorrowerStep('new')}
+                    className="btn-primary w-full text-sm">
+                    + Add new borrower
+                  </button>
+                </div>
+              )}
+
+              {/* Step 1b — add new borrower */}
+              {borrowerStep === 'new' && (
+                <form onSubmit={submitNewBorrower} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Full name <span className="text-red-500">*</span>
+                    </label>
+                    <input type="text" className="input-field"
+                      value={newBorrowerForm.full_name}
+                      onChange={(e) => setNewBorrowerForm({
+                        ...newBorrowerForm, full_name: e.target.value
+                      })}
+                      required autoFocus />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Phone <span className="text-red-500">*</span>
+                    </label>
+                    <input type="tel" className="input-field"
+                      placeholder="98XXXXXXXX"
+                      value={newBorrowerForm.phone}
+                      onChange={(e) => setNewBorrowerForm({
+                        ...newBorrowerForm, phone: e.target.value
+                      })}
+                      required />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Address <span className="text-red-500">*</span>
+                    </label>
+                    <textarea className="input-field resize-none" rows={2}
+                      value={newBorrowerForm.address}
+                      onChange={(e) => setNewBorrowerForm({
+                        ...newBorrowerForm, address: e.target.value
+                      })}
+                      required />
+                  </div>
+
+                  <div className="border-t border-gray-100 pt-4">
+                    <p className="text-sm font-semibold text-gray-700 mb-3">
+                      Required documents
+                    </p>
+                    <BorrowerDocField label="Passport-size photo" fieldKey="photo"
+                      preview={newBorrowerPreviews.photo} onChange={handleNewBorrowerFile} />
+                    <BorrowerDocField label="Citizenship — Front" fieldKey="citizenship_front"
+                      preview={newBorrowerPreviews.citizenship_front} onChange={handleNewBorrowerFile} />
+                    <BorrowerDocField label="Citizenship — Back" fieldKey="citizenship_back"
+                      preview={newBorrowerPreviews.citizenship_back} onChange={handleNewBorrowerFile} />
+                    <BorrowerDocField label="Signature" fieldKey="signature"
+                      preview={newBorrowerPreviews.signature} onChange={handleNewBorrowerFile} />
+                  </div>
+
+                  <div className="flex gap-3 pt-1">
+                    <button type="button" onClick={() => setBorrowerStep('select')}
+                      className="btn-secondary flex-1">Back</button>
+                    <button type="submit" disabled={borrowerLoanLoad}
+                      className="btn-primary flex-1">
+                      {borrowerLoanLoad ? 'Saving...' : 'Continue'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Step 2 — loan terms */}
+              {borrowerStep === 'terms' && selectedBorrower && (
+                <form onSubmit={submitBorrowerLoan} className="space-y-4">
+                  <div className="bg-gray-50 rounded-lg px-4 py-3 flex items-center gap-3">
+                    {selectedBorrower.photo_url ? (
+                      <img src={selectedBorrower.photo_url} alt={selectedBorrower.full_name}
+                        className="w-10 h-10 rounded-full object-cover" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-gray-200" />
+                    )}
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800">
+                        {selectedBorrower.full_name}
+                      </p>
+                      <p className="text-xs text-gray-500">{selectedBorrower.phone}</p>
+                    </div>
+                  </div>
+
+                  <FiscalYearDatePicker
+                    fiscalYear={borrowerLoanForm.fiscal_year}
+                    onFiscalYearChange={(fy) => setBorrowerLoanForm({
+                      ...borrowerLoanForm, fiscal_year: fy
+                    })}
+                    dateValue={borrowerLoanForm.first_due_date}
+                    onDateChange={(val) => setBorrowerLoanForm({
+                      ...borrowerLoanForm, first_due_date: val
+                    })}
+                    dateLabel="Select first due date"
+                    required
+                  />
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Principal amount (Rs.) <span className="text-red-500">*</span>
+                    </label>
+                    <input type="number" step="0.01" min="1" className="input-field"
+                      value={borrowerLoanForm.principal}
+                      onChange={(e) => setBorrowerLoanForm({
+                        ...borrowerLoanForm, principal: e.target.value
+                      })}
+                      required />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Interest rate (% p.a.) <span className="text-red-500">*</span>
+                    </label>
+                    <input type="number" step="0.01" min="0" className="input-field"
+                      value={borrowerLoanForm.interest_rate}
+                      onChange={(e) => setBorrowerLoanForm({
+                        ...borrowerLoanForm, interest_rate: e.target.value
+                      })}
+                      required />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Term (months) <span className="text-red-500">*</span>
+                    </label>
+                    <input type="number" min="1" className="input-field"
+                      value={borrowerLoanForm.term_months}
+                      onChange={(e) => setBorrowerLoanForm({
+                        ...borrowerLoanForm, term_months: e.target.value
+                      })}
+                      required />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Purpose (optional)
+                    </label>
+                    <textarea className="input-field resize-none" rows={2}
+                      value={borrowerLoanForm.purpose}
+                      onChange={(e) => setBorrowerLoanForm({
+                        ...borrowerLoanForm, purpose: e.target.value
+                      })} />
+                  </div>
+
+                  <div className="flex gap-3 pt-1">
+                    <button type="button" onClick={() => setBorrowerStep('select')}
+                      className="btn-secondary flex-1">Back</button>
+                    <button type="submit" disabled={borrowerLoanLoad}
+                      className="btn-primary flex-1">
+                      {borrowerLoanLoad ? 'Creating...' : 'Create loan'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+            </div>
+          </div>
+        </div>
+      )}
 
     </AdminLayout>
   )
@@ -682,6 +1086,43 @@ function LoanDetailPanel({
   const [scheduleLoad, setScheduleLoad] = useState(false)
   const [activeTab,    setActiveTab]    = useState('history')
   const [payingMonth,  setPayingMonth]  = useState(null)  // which month Pay Now was clicked
+
+  // Penalty states
+  const [showPenalty, setShowPenalty] = useState(false)
+
+  const [penaltyForm, setPenaltyForm] = useState({
+    amount: '',
+    nepali_date: '',
+    reason: '',
+    fiscal_year: '',
+  })
+
+  const [penaltyErr, setPenaltyErr] = useState('')
+  const [penaltyLoad, setPenaltyLoad] = useState(false)
+
+  async function handleApplyPenalty(e) {
+    e.preventDefault()
+    setPenaltyErr('')
+    if (!penaltyForm.nepali_date) {
+      setPenaltyErr('Please select a date.')
+      return
+    }
+    if (parseFloat(penaltyForm.amount) <= 0) {
+      setPenaltyErr('Amount must be greater than zero.')
+      return
+    }
+    setPenaltyLoad(true)
+    try {
+      await api.post(`/loans/${selected.id}/penalty/`, penaltyForm)
+      setPenaltyForm({ amount: '', nepali_date: '', reason: '' })
+      setShowPenalty(false)
+      onRepay()  // refresh loan data
+    } catch (err) {
+      setPenaltyErr(err.response?.data?.error || 'Failed to apply penalty.')
+    } finally {
+      setPenaltyLoad(false)
+    }
+  }
 
   useEffect(() => {
     if (selected?.status === 'active' || selected?.status === 'closed') {
@@ -725,6 +1166,18 @@ function LoanDetailPanel({
               {selected.status}
             </span>
           </div>
+          {selected.status === 'active' && (
+            <button
+              onClick={() => {
+                setShowPenalty(true)
+                setPenaltyErr('')
+                setPenaltyForm({ amount: '', nepali_date: '', reason: '', fiscal_year: '' })
+              }}
+              className="text-xs py-1.5 px-3 rounded-lg bg-amber-100 text-amber-700
+                        hover:bg-amber-200 font-medium transition-colors">
+              Apply penalty
+            </button>
+          )}
         </div>
       </div>
 
@@ -927,6 +1380,7 @@ function LoanDetailPanel({
                                              transition-colors">
                                   Pay now
                                 </button>
+                                
                               )}
                             </div>
                           )}
@@ -956,7 +1410,114 @@ function LoanDetailPanel({
           }}
         />
       )}
+       {/* Apply penalty modal */}
+      {showPenalty && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center
+                        bg-black bg-opacity-40 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="px-6 py-4 border-b border-gray-200 flex
+                            items-center justify-between">
+              <h3 className="font-semibold text-gray-800">
+                Apply penalty — {selected.member_name}
+              </h3>
+              <button onClick={() => setShowPenalty(false)}
+                className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+            <form onSubmit={handleApplyPenalty} className="px-6 py-5 space-y-4">
+              {penaltyErr && (
+                <div className="px-3 py-2 bg-red-50 border border-red-200
+                                text-red-700 rounded-lg text-sm">
+                  {penaltyErr}
+                </div>
+              )}
+              <div className="bg-amber-50 border border-amber-100 rounded-lg
+                              px-4 py-3">
+                <p className="text-xs text-amber-700">
+                  ⚠️ This penalty will be added to the loan's outstanding balance.
+                  It will be collected automatically with future EMI payments
+                  (penalty is paid off first, before interest and principal).
+                </p>
+              </div>
+              <FiscalYearDatePicker
+                fiscalYear={penaltyForm.fiscal_year}
+                onFiscalYearChange={(fy) => setPenaltyForm({ ...penaltyForm, fiscal_year: fy })}
+                dateValue={penaltyForm.nepali_date}
+                onDateChange={(val) => setPenaltyForm({ ...penaltyForm, nepali_date: val })}
+                required
+              />
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Penalty amount (Rs.) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number" step="0.01" min="0.01"
+                  className="input-field"
+                  value={penaltyForm.amount}
+                  onChange={(e) => setPenaltyForm({
+                    ...penaltyForm, amount: e.target.value
+                  })}
+                  required autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Reason (optional)
+                </label>
+                <input
+                  type="text" className="input-field"
+                  placeholder="e.g. Missed Jestha EMI"
+                  value={penaltyForm.reason}
+                  onChange={(e) => setPenaltyForm({
+                    ...penaltyForm, reason: e.target.value
+                  })}
+                />
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button type="button" onClick={() => setShowPenalty(false)}
+                  className="btn-secondary flex-1">Cancel</button>
+                <button type="submit" disabled={penaltyLoad}
+                  className="flex-1 py-2 rounded-lg bg-amber-600
+                            hover:bg-amber-700 text-white font-medium text-sm">
+                  {penaltyLoad ? 'Applying...' : 'Apply penalty'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </>
+  )
+}
+
+function BorrowerDocField({ label, fieldKey, preview, onChange }) {
+  const inputRef = useRef(null)
+  return (
+    <div className="mb-4">
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        {label} <span className="text-red-500">*</span>
+      </label>
+      {preview ? (
+        <div className="relative">
+          <img src={preview} alt={label}
+            className="w-full h-28 object-cover rounded-lg border border-gray-200" />
+          <button type="button"
+            onClick={() => { onChange(fieldKey, null); if (inputRef.current) inputRef.current.value = '' }}
+            className="absolute top-2 right-2 bg-red-500 text-white rounded-full
+                       w-6 h-6 flex items-center justify-center text-xs">✕</button>
+        </div>
+      ) : (
+        <div onClick={() => inputRef.current?.click()}
+          className="border-2 border-dashed border-gray-300 rounded-lg h-28
+                     flex flex-col items-center justify-center cursor-pointer
+                     hover:border-primary-400 hover:bg-primary-50">
+          <span className="text-xl mb-1">📎</span>
+          <p className="text-xs text-gray-500">Click to upload</p>
+        </div>
+      )}
+      <input ref={inputRef} type="file"
+        accept="image/jpeg,image/jpg,image/png,image/webp" className="hidden"
+        onChange={(e) => onChange(fieldKey, e.target.files[0] || null)} />
+    </div>
   )
 }
 
@@ -1005,28 +1566,43 @@ function ModalButtons({ onCancel, loading, label }) {
   )
 }
 
-function PayNowModal({ month, loan, fmt, onClose, onSuccess, accounts }) {
-  const [amount,     setAmount]     = useState(month.emi)
-  const [note,       setNote]       = useState('')
+function PayNowModal({ month, loan, fmt, onClose, onSuccess, accounts = [] }) {
+  const [fiscalYear, setFiscalYear] = useState('')
   const [nepaliDate, setNepaliDate] = useState('')
+  const [amount,     setAmount]     = useState('')
   const [accountId,  setAccountId]  = useState('')
+  const [note,       setNote]       = useState('')
   const [loading,    setLoading]    = useState(false)
   const [err,        setErr]        = useState('')
+
+  useEffect(() => {
+    api.get('/fiscal-years/current/')
+      .then(res => setFiscalYear(res.data.fiscal_year))
+      .catch(() => {})
+  }, [])
+
+  // once fiscal year + date are both selected, auto-fill EMI amount
+  useEffect(() => {
+    if (fiscalYear && nepaliDate && !amount) {
+      setAmount(month.emi)
+    }
+  }, [fiscalYear, nepaliDate])
+
+  const readyForAmount = fiscalYear && nepaliDate
 
   async function handleSubmit(e) {
     e.preventDefault()
     setErr('')
+    if (!fiscalYear) {
+      setErr('Please select a fiscal year.')
+      return
+    }
+    if (!nepaliDate) {
+      setErr('Please select the payment date.')
+      return
+    }
     if (!accountId) {
       setErr('Please select an account.')
-      return
-    }
-    if (!nepaliDate.trim()) {
-      setErr('Please enter the payment date.')
-      return
-    }
-    const bsPattern = /^\d{4}-\d{2}-\d{2}$/
-    if (!bsPattern.test(nepaliDate.trim())) {
-      setErr('Date must be YYYY-MM-DD format (e.g. 2082-02-11)')
       return
     }
     if (parseFloat(amount) <= 0) {
@@ -1037,11 +1613,8 @@ function PayNowModal({ month, loan, fmt, onClose, onSuccess, accounts }) {
     setLoading(true)
     try {
       await api.post(`/loans/${loan.id}/repay/`, {
-        amount:      amount,
-        note:        note,
-        paid_at:     adDate,
-        nepali_date: nepaliDate.trim(),
-        account_id:  accountId,
+        amount, note, paid_at: adDate,
+        nepali_date: nepaliDate, account_id: accountId,
       })
       onSuccess()
     } catch (error) {
@@ -1052,9 +1625,9 @@ function PayNowModal({ month, loan, fmt, onClose, onSuccess, accounts }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 overflow-y-auto">
-      <div className="min-h-screen flex justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-8">
+    <div className="fixed inset-0 z-50 flex items-center justify-center
+                    bg-black bg-opacity-40 px-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
         <div className="px-6 py-4 border-b border-gray-200 flex
                         items-center justify-between">
           <div>
@@ -1068,88 +1641,98 @@ function PayNowModal({ month, loan, fmt, onClose, onSuccess, accounts }) {
         </div>
 
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-          {err && <ErrorBox msg={err} />}
-
-          <div className="bg-gray-50 rounded-lg px-4 py-3 grid grid-cols-2 gap-3">
-            <div>
-              <p className="text-xs text-gray-500">Scheduled EMI</p>
-              <p className="text-sm font-semibold text-gray-800">
-                {fmt(month.emi)}
-              </p>
+          {err && (
+            <div className="px-3 py-2 bg-red-50 border border-red-200
+                            text-red-700 rounded-lg text-sm">
+              {err}
             </div>
-            <div>
-              <p className="text-xs text-gray-500">Remaining balance</p>
-              <p className="text-sm font-semibold text-red-600">
-                {fmt(loan.amount_remaining)}
-              </p>
-            </div>
-          </div>
+          )}
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Amount paid (Rs.) <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="number" step="0.01" min="0.01"
-              className="input-field"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              required autoFocus
-            />
-          </div>
+          <FiscalYearDatePicker
+            fiscalYear={fiscalYear}
+            onFiscalYearChange={setFiscalYear}
+            dateValue={nepaliDate}
+            onDateChange={setNepaliDate}
+            required
+          />
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Received in account <span className="text-red-500">*</span>
-            </label>
-            <select
-              className="input-field"
-              value={accountId}
-              onChange={(e) => setAccountId(e.target.value)}
-              required>
-              <option value="">Select account...</option>
-              {accounts.map(a => (
-                <option key={a.id} value={a.id}>
-                  {a.name} (Rs. {parseFloat(a.balance).toLocaleString('en-NP')})
-                </option>
-              ))}
-            </select>
-          </div>
+          {readyForAmount && (
+            <>
+              <div className="bg-gray-50 rounded-lg px-4 py-3
+                              grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-xs text-gray-500">Scheduled EMI</p>
+                  <p className="text-sm font-semibold text-gray-800">
+                    {fmt(month.emi)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Remaining balance</p>
+                  <p className="text-sm font-semibold text-red-600">
+                    {fmt(loan.amount_remaining)}
+                  </p>
+                </div>
+              </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Payment date (BS) <span className="text-red-500">*</span>
-            </label>
-            <BSDatePicker
-              value={nepaliDate}
-              onChange={(val) => setNepaliDate(val)}
-              required
-            />
-          </div>
+              <div>
+                <label className="block text-sm font-medium
+                                  text-gray-700 mb-1">
+                  Amount paid (Rs.) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number" step="0.01" min="0.01"
+                  className="input-field"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  required
+                />
+              </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Note (optional)
-            </label>
-            <input
-              type="text" className="input-field"
-              placeholder={`Month ${month.month} installment`}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-            />
-          </div>
+              <div>
+                <label className="block text-sm font-medium
+                                  text-gray-700 mb-1">
+                  Received in account <span className="text-red-500">*</span>
+                </label>
+                <select
+                  className="input-field"
+                  value={accountId}
+                  onChange={(e) => setAccountId(e.target.value)}
+                  required>
+                  <option value="">Select account...</option>
+                  {accounts.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} ({a.account_type_display}) — Rs.{' '}
+                      {parseFloat(a.balance).toLocaleString('en-NP')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium
+                                  text-gray-700 mb-1">
+                  Note (optional)
+                </label>
+                <input
+                  type="text" className="input-field"
+                  placeholder={`Month ${month.month} installment`}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                />
+              </div>
+            </>
+          )}
 
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose}
               className="btn-secondary flex-1">Cancel</button>
-            <button type="submit" disabled={loading}
+            <button type="submit" disabled={loading || !readyForAmount}
               className="btn-primary flex-1">
               {loading ? 'Recording...' : 'Confirm payment'}
             </button>
           </div>
         </form>
       </div>
-    </div>
     </div>
   )
 }

@@ -36,6 +36,8 @@ export default function MemberDashboard() {
   const [loanSuccess,  setLoanSuccess]  = useState('')
   const [cancelLoad,   setCancelLoad]   = useState(false)
 
+  const [penalties, setPenalties] = useState([])
+
   useEffect(() => { fetchData() }, [])
 
   async function fetchData() {
@@ -46,6 +48,7 @@ export default function MemberDashboard() {
         api.get('/member/savings/').catch(() => null),
         api.get('/member/loans/').catch(() => null),
         api.get('/auth/me/'),
+        api.get('/member/penalties/').catch(() => null)
       ])
       if (savRes)     setSavings(savRes.data)
       if (loanRes)    setLoans(loanRes.data)
@@ -317,6 +320,41 @@ export default function MemberDashboard() {
             </div>
           )}
         </Section>
+
+        {penalties.length > 0 && (
+          <Section title="Penalties" icon="⚠️">
+            <div className="space-y-1.5">
+              {penalties.map((p) => (
+                <div key={p.id}
+                  className="flex justify-between items-center px-4 py-3
+                            rounded-xl bg-amber-50 border border-amber-100">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-800">
+                      {p.penalty_type === 'savings'
+                        ? 'Savings Penalty' : 'Loan Penalty'}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {p.reason || 'No reason specified'}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {formatBS(p.nepali_date)}
+                    </p>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-sm font-semibold text-amber-700">
+                      {fmt(p.amount)}
+                    </p>
+                    {p.penalty_type === 'loan' && (
+                      <p className="text-xs text-gray-400">
+                        {p.is_paid ? 'Paid' : `Rs. ${p.amount_remaining} pending`}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Section>
+        )}
 
         {/* Loan application modal */}
         {showLoanForm && (

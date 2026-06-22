@@ -4,9 +4,10 @@ import api from '../../lib/api'
 import { toBS } from '../../lib/nepaliDate'
 import BSDatePicker from '../../components/BSDatePicker'
 import useAccounts from '../../hooks/useAccounts'
+import FiscalYearDatePicker from '../../components/FiscalYearDatePicker'
 
 const EMPTY_ACCOUNT_FORM = { member_id: '', interest_rate: '6.00' }
-const EMPTY_TXN_FORM = { amount: '', note: '', account_id: '', nepali_date: '' }
+const EMPTY_TXN_FORM = { fiscal_year: '',amount: '', note: '', account_id: '', nepali_date: '' }
 
 export default function AdminSavings() {
   const [savingsAccounts, setSavingsAccounts] = useState([])  // renamed to avoid conflict
@@ -16,6 +17,12 @@ export default function AdminSavings() {
   const [successMsg,      setSuccessMsg]       = useState('')
   const [showInterestModal, setShowInterestModal] = useState(false)
   const [interestResult,    setInterestResult]    = useState(null)
+  const [showPenalty, setShowPenalty] = useState(false) 
+  const [penaltyForm, setPenaltyForm] = useState({
+  amount: '', account_id: '', nepali_date: '', reason: '', fiscal_year: ''
+  })
+  const [penaltyErr,  setPenaltyErr]  = useState('')
+  const [penaltyLoad, setPenaltyLoad] = useState(false)
 
   const [selected,   setSelected]   = useState(null)
   const [txns,       setTxns]       = useState([])
@@ -85,6 +92,28 @@ export default function AdminSavings() {
     setFormErr('')
   }
 
+  async function openDeposit() {
+    setShowDeposit(true)
+    setFormErr('')
+    let currentFY = ''
+    try {
+      const res = await api.get('/fiscal-years/current/')
+      currentFY = res.data.fiscal_year
+    } catch {}
+    setTxnForm({ ...EMPTY_TXN_FORM, fiscal_year: currentFY })
+  }
+
+  async function openWithdraw() {
+    setShowWithdraw(true)
+    setFormErr('')
+    let currentFY = ''
+    try {
+      const res = await api.get('/fiscal-years/current/')
+      currentFY = res.data.fiscal_year
+    } catch {}
+    setTxnForm({ ...EMPTY_TXN_FORM, fiscal_year: currentFY })
+  }
+
   const membersWithoutAccount = members.filter(
     m => !savingsAccounts.find(a => a.member === m.id)
   )
@@ -114,6 +143,11 @@ export default function AdminSavings() {
   async function handleDeposit(e) {
     e.preventDefault()
     setFormErr('')
+    if (!txnForm.fiscal_year) {
+      setFormErr('Please select a fiscal year.')
+      return
+    }
+
     if (!txnForm.account_id) {
       setFormErr('Please select an account.')
       return
@@ -145,8 +179,8 @@ export default function AdminSavings() {
   async function handleWithdraw(e) {
     e.preventDefault()
     setFormErr('')
-    if (!txnForm.account_id) {
-      setFormErr('Please select an account.')
+    if (!txnForm.fiscal_year) {
+      setFormErr('Please select a fiscal year.')
       return
     }
     if (!txnForm.nepali_date) {
@@ -170,6 +204,36 @@ export default function AdminSavings() {
       setFormErr(err.response?.data?.error || 'Withdrawal failed.')
     } finally {
       setFormLoad(false)
+    }
+  }
+
+  async function handleApplyPenalty(e) {
+    e.preventDefault()
+    setPenaltyErr('')
+    if (!penaltyForm.account_id) {
+      setPenaltyErr('Please select an account.')
+      return
+    }
+    if (!penaltyForm.nepali_date) {
+      setPenaltyErr('Please select a date.')
+      return
+    }
+    if (parseFloat(penaltyForm.amount) <= 0) {
+      setPenaltyErr('Amount must be greater than zero.')
+      return
+    }
+    setPenaltyLoad(true)
+    try {
+      await api.post(`/savings/${selected.id}/penalty/`, penaltyForm)
+      flash(`Penalty of Rs. ${penaltyForm.amount} applied successfully.`)
+      setShowPenalty(false)
+      setPenaltyForm({ amount: '', account_id: '', nepali_date: '', reason: '' })
+      fetchAll()
+      fetchTxns(selected.id)
+    } catch (err) {
+      setPenaltyErr(err.response?.data?.error || 'Failed to apply penalty.')
+    } finally {
+      setPenaltyLoad(false)
     }
   }
 
@@ -362,6 +426,16 @@ export default function AdminSavings() {
                         className="btn-secondary text-xs py-1.5">
                         Withdraw
                       </button>
+                      <button
+                        onClick={() => {
+                          setShowPenalty(true)
+                          setPenaltyErr('')
+                          setPenaltyForm({ amount: '', account_id: '', nepali_date: '', reason: '', fiscal_year: '' })
+                        }}
+                        className="text-xs py-1.5 px-3 rounded-lg bg-amber-100 text-amber-700
+                                  hover:bg-amber-200 font-medium transition-colors">
+                        Apply penalty
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -510,6 +584,86 @@ export default function AdminSavings() {
               onCancel={closeAll}
               loading={formLoad}
               label="Confirm withdrawal"
+            />
+          </form>
+        </Modal>
+      )}
+
+      {showPenalty && (
+        <Modal
+          title={`Apply penalty — ${selected?.member_name}`}
+          onClose={() => setShowPenalty(false)}>
+          <form onSubmit={handleApplyPenalty} className="space-y-4">
+            {penaltyErr && <ErrorBox msg={penaltyErr} />}
+            <div className="bg-amber-50 border border-amber-100 rounded-lg
+                            px-4 py-3">
+              <p className="text-xs text-amber-700">
+                ⚠️ This penalty is recorded as income for the cooperative.
+                It does not affect the member's savings balance.
+              </p>
+            </div>
+            <FiscalYearDatePicker
+              fiscalYear={penaltyForm.fiscal_year}
+              onFiscalYearChange={(fy) => setPenaltyForm({ ...penaltyForm, fiscal_year: fy })}
+              dateValue={penaltyForm.nepali_date}
+              onDateChange={(val) => setPenaltyForm({ ...penaltyForm, nepali_date: val })}
+              required
+            />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Penalty amount (Rs.) <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                className="input-field"
+                value={penaltyForm.amount}
+                onChange={(e) => setPenaltyForm({
+                  ...penaltyForm, amount: e.target.value
+                })}
+                required
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Collected in account <span className="text-red-500">*</span>
+              </label>
+              <select
+                className="input-field"
+                value={penaltyForm.account_id}
+                onChange={(e) => setPenaltyForm({
+                  ...penaltyForm, account_id: e.target.value
+                })}
+                required>
+                <option value="">Select account...</option>
+                {cashAccounts.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.account_type_display}) — Rs.{' '}
+                    {parseFloat(a.balance).toLocaleString('en-NP')}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Reason (optional)
+              </label>
+              <input
+                type="text"
+                className="input-field"
+                placeholder="e.g. Missed Jestha deposit"
+                value={penaltyForm.reason}
+                onChange={(e) => setPenaltyForm({
+                  ...penaltyForm, reason: e.target.value
+                })}
+              />
+            </div>
+            <ModalButtons
+              onCancel={() => setShowPenalty(false)}
+              loading={penaltyLoad}
+              label="Apply penalty"
             />
           </form>
         </Modal>
@@ -695,6 +849,13 @@ function ErrorBox({ msg }) {
 function AmountNoteFields({ form, setForm, label, accounts = [] }) {
   return (
     <>
+      <FiscalYearDatePicker
+        fiscalYear={form.fiscal_year}
+        onFiscalYearChange={(fy) => setForm({ ...form, fiscal_year: fy })}
+        dateValue={form.nepali_date}
+        onDateChange={(val) => setForm({ ...form, nepali_date: val })}
+        required
+      />
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
           {label} <span className="text-red-500">*</span>
@@ -708,7 +869,6 @@ function AmountNoteFields({ form, setForm, label, accounts = [] }) {
           value={form.amount}
           onChange={(e) => setForm({ ...form, amount: e.target.value })}
           required
-          autoFocus
         />
       </div>
       <div>
@@ -723,17 +883,14 @@ function AmountNoteFields({ form, setForm, label, accounts = [] }) {
           <option value="">Select account...</option>
           {accounts.map(a => (
             <option key={a.id} value={a.id}>
-              {a.name} ({a.account_type_display})
+              {a.name} ({a.account_type_display}) — Rs.{' '}
+              {parseFloat(a.balance).toLocaleString('en-NP', {
+                minimumFractionDigits: 2
+              })}
             </option>
           ))}
         </select>
       </div>
-      <BSDatePicker
-        label="Date (BS)"
-        value={form.nepali_date}
-        onChange={(val) => setForm({ ...form, nepali_date: val })}
-        required
-      />
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
           Note (optional)

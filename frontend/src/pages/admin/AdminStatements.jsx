@@ -19,6 +19,9 @@ export default function AdminStatements() {
   const [generating,  setGenerating]  = useState(false)
   const [deleting,    setDeleting]    = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
+  const [fiscalYears,  setFiscalYears]  = useState([])
+  const [monthOptions, setMonthOptions] = useState([])
+
 
   // settings
   const [settings,      setSettings]      = useState(null)
@@ -29,7 +32,7 @@ export default function AdminStatements() {
 
   // generate form
   const [genForm, setGenForm] = useState({
-    bs_year: '', bs_month: '', fiscal_year: '',
+   fiscal_year: '', bs_year: '', bs_month: ''
   })
 
   const printRef = useRef(null)
@@ -37,7 +40,8 @@ export default function AdminStatements() {
   useEffect(() => {
     fetchStatements()
     fetchSettings()
-  }, [activeTab])
+    fetchFiscalYears()
+  }, [])
 
   async function fetchStatements() {
     setLoading(true)
@@ -60,10 +64,33 @@ export default function AdminStatements() {
     } catch {}
   }
 
+  async function fetchFiscalYears() {
+    try {
+      const res = await api.get('/fiscal-years/')
+      setFiscalYears(res.data.fiscal_years)
+    } catch {
+      setError('Failed to load fiscal years.')
+    }
+  }
+
   function flash(msg) {
     setSuccessMsg(msg)
     setTimeout(() => setSuccessMsg(''), 3000)
   }
+
+  async function fetchMonthsForFY(fy) {
+  if (!fy) {
+    setMonthOptions([])
+    return
+  }
+  try {
+    const res = await api.get(`/fiscal-years/months/?fy=${fy}`)
+    setMonthOptions(res.data.months)
+  } catch {
+    setMonthOptions([])
+  }
+}
+
 
   async function selectStatement(s) {
     setSelectLoad(true)
@@ -175,7 +202,7 @@ export default function AdminStatements() {
       const wb   = XLSX.utils.book_new()
       const rows = buildExcelRows(selected)
       const ws   = XLSX.utils.aoa_to_sheet(rows)
-      ws['!cols'] = [{ wch: 8 }, { wch: 30 }, { wch: 18 }, { wch: 18 }]
+      ws['!cols'] = [{ wch: 30 }, { wch: 15 }, { wch: 30 }, { wch: 15 }]
       XLSX.utils.book_append_sheet(wb, ws, 'Trial Balance')
       XLSX.writeFile(
         wb,
@@ -191,95 +218,42 @@ export default function AdminStatements() {
   }
 
   function buildExcelRows(tb) {
-    const f    = (n) => parseFloat(n || 0).toFixed(2)
+    const f = (n) => parseFloat(n || 0).toFixed(2)
     const rows = []
 
-    rows.push(['Shree Shangharshil Bachat Samuha', '', '', ''])
-    rows.push(['Trial Balance', '', '', ''])
+    rows.push(['SHREE SHANGHARSHIL BACHAT SAMUHA', '', '', ''])
+    rows.push(['Receipts and Payments Report', '', '', ''])
     rows.push([
       tb.period_type === 'monthly'
-        ? `${tb.bs_month_name} ${tb.bs_year}`
+        ? `${tb.bs_month_name} ${tb.bs_year} (FY ${tb.fiscal_year})`
         : `Fiscal Year ${tb.fiscal_year}`,
       '', '', '',
     ])
     rows.push([`Period: ${tb.start_date_ad} to ${tb.end_date_ad}`, '', '', ''])
     rows.push(['', '', '', ''])
-    rows.push(['Code', 'Account', 'Debit (Rs.)', 'Credit (Rs.)'])
+    rows.push(['Income', 'Amount', 'Expenditure', 'Amount'])
     rows.push(['', '', '', ''])
 
-    // Assets
-    let assetTotal = 0
-    rows.push(['1000', 'ASSETS', '', ''])
-    for (const item of tb.line_items?.assets || []) {
-      rows.push([item.code || '', `  ${item.name}`, f(item.debit), ''])
-      assetTotal += parseFloat(item.debit || 0)
+    const incomeItems = tb.income_items || []
+    const expItems     = tb.expenditure_items || []
+    const maxRows       = Math.max(incomeItems.length, expItems.length)
+
+    for (let i = 0; i < maxRows; i++) {
+      const inc = incomeItems[i]
+      const exp = expItems[i]
+      rows.push([
+        inc ? inc.name : '',
+        inc ? f(inc.amount) : '',
+        exp ? exp.name : '',
+        exp ? f(exp.amount) : '',
+      ])
     }
-    rows.push(['', '  TOTAL ASSETS', f(assetTotal), ''])
+
     rows.push(['', '', '', ''])
-
-    // Liabilities
-    let liabTotal = 0
-    rows.push(['2000', 'LIABILITIES', '', ''])
-    for (const item of tb.line_items?.liabilities || []) {
-      rows.push([item.code || '', `  ${item.name}`, '', f(item.credit)])
-      liabTotal += parseFloat(item.credit || 0)
-    }
-    rows.push(['', '  TOTAL LIABILITIES', '', f(liabTotal)])
-    rows.push(['', '', '', ''])
-
-    // Income
-    let incTotal = 0
-    if ((tb.line_items?.income || []).length > 0) {
-      rows.push(['3000', 'INCOME', '', ''])
-      for (const item of tb.line_items?.income || []) {
-        rows.push([item.code || '', `  ${item.name}`, '', f(item.credit)])
-        incTotal += parseFloat(item.credit || 0)
-      }
-      rows.push(['', '  TOTAL INCOME', '', f(incTotal)])
-      rows.push(['', '', '', ''])
-    }
-
-    // Expenses
-    let expTotal = 0
-    if ((tb.line_items?.expenses || []).length > 0) {
-      rows.push(['4000', 'EXPENSES', '', ''])
-      for (const item of tb.line_items?.expenses || []) {
-        rows.push([item.code || '', `  ${item.name}`, f(item.debit), ''])
-        expTotal += parseFloat(item.debit || 0)
-      }
-      rows.push(['', '  TOTAL EXPENSES', f(expTotal), ''])
-      rows.push(['', '', '', ''])
-    }
-
-    // Equity
-    rows.push(['', 'EQUITY', '', ''])
-    rows.push(['', '  Opening Equity', '', f(tb.opening_equity)])
-    const surplus = parseFloat(tb.net_surplus || 0)
     rows.push([
-      '',
-      `  Net ${surplus >= 0 ? 'Surplus' : 'Deficit'}`,
-      surplus < 0 ? f(Math.abs(surplus)) : '',
-      surplus >= 0 ? f(surplus) : '',
+      'Total Income', f(tb.total_income),
+      'Total Expenditure', f(tb.total_expenditure),
     ])
-    rows.push(['', '  TOTAL EQUITY', '', f(tb.closing_equity)])
-    rows.push(['', '', '', ''])
-
-    // Grand Total
-    rows.push([
-      '',
-      'GRAND TOTAL',
-      f(tb.line_items?.totals?.debit),
-      f(tb.line_items?.totals?.credit),
-    ])
-
-    if (!tb.is_balanced) {
-      rows.push(['', `Difference: Rs. ${f(tb.difference)}`, '', ''])
-    } else {
-      rows.push(['', '✓ BALANCED', '', ''])
-    }
-
-    rows.push(['', '', '', ''])
-    rows.push(['Prepared by: _____________    Approved by: _____________    Date: _____________', '', '', ''])
     rows.push(['', '', '', ''])
     rows.push([`Generated: ${new Date(tb.generated_at).toLocaleString()}`, '', '', ''])
 
@@ -302,9 +276,6 @@ export default function AdminStatements() {
             <h2 className="text-lg font-semibold text-gray-800">
               Statements
             </h2>
-            <p className="text-sm text-gray-500">
-              Trial balance — always shows live data
-            </p>
           </div>
           <button
             onClick={() => setShowSettings(true)}
@@ -377,65 +348,52 @@ export default function AdminStatements() {
                   Generate statement
                 </h3>
               </div>
-              <form onSubmit={handleGenerate} className="px-4 py-4 space-y-3">
-                {activeTab === 'monthly' ? (
-                  <>
-                    <div>
-                      <label className="block text-xs font-medium
-                                        text-gray-700 mb-1">
-                        BS Year
-                      </label>
-                      <input
-                        type="number"
-                        className="input-field text-sm"
-                        placeholder="e.g. 2082"
-                        value={genForm.bs_year}
-                        onChange={(e) => setGenForm({
-                          ...genForm, bs_year: e.target.value
-                        })}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium
-                                        text-gray-700 mb-1">
-                        BS Month
-                      </label>
-                      <select
-                        className="input-field text-sm"
-                        value={genForm.bs_month}
-                        onChange={(e) => setGenForm({
-                          ...genForm, bs_month: e.target.value
-                        })}
-                        required>
-                        <option value="">Select month...</option>
-                        {BS_MONTHS.map((m, i) => (
-                          <option key={i + 1} value={i + 1}>{m}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </>
-                ) : (
+             <form onSubmit={handleGenerate} className="px-4 py-4 space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Fiscal Year
+                  </label>
+                  <select
+                    className="input-field text-sm"
+                    value={genForm.fiscal_year}
+                    onChange={(e) => {
+                      const fy = e.target.value
+                      setGenForm({ ...genForm, fiscal_year: fy, bs_year: '', bs_month: '' })
+                      fetchMonthsForFY(fy)
+                    }}
+                    required>
+                    <option value="">Select fiscal year...</option>
+                    {fiscalYears.map(fy => (
+                      <option key={fy} value={fy}>{fy}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {activeTab === 'monthly' && genForm.fiscal_year && (
                   <div>
-                    <label className="block text-xs font-medium
-                                      text-gray-700 mb-1">
-                      Fiscal Year
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Month
                     </label>
-                    <input
-                      type="text"
+                    <select
                       className="input-field text-sm"
-                      placeholder="e.g. 2081/82"
-                      value={genForm.fiscal_year}
-                      onChange={(e) => setGenForm({
-                        ...genForm, fiscal_year: e.target.value
-                      })}
-                      required
-                    />
-                    <p className="text-xs text-gray-400 mt-1">
-                      Format: YYYY/YY (e.g. 2081/82)
-                    </p>
+                      value={genForm.bs_month && genForm.bs_year
+                        ? `${genForm.bs_year}-${genForm.bs_month}` : ''}
+                      onChange={(e) => {
+                        const [y, m] = e.target.value.split('-')
+                        setGenForm({ ...genForm, bs_year: y, bs_month: m })
+                      }}
+                      required>
+                      <option value="">Select month...</option>
+                      {monthOptions.map(m => (
+                        <option key={`${m.bs_year}-${m.bs_month}`}
+                          value={`${m.bs_year}-${m.bs_month}`}>
+                          {m.month_name} {m.bs_year}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 )}
+
                 <button
                   type="submit"
                   disabled={generating}
@@ -537,17 +495,6 @@ export default function AdminStatements() {
                                  font-medium px-2">
                       Delete
                     </button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-400 italic">
-                      Live data
-                    </span>
-                    <span className={`text-xs font-semibold
-                      ${selected.is_balanced
-                        ? 'text-green-600' : 'text-red-600'
-                      }`}>
-                      {selected.is_balanced ? '✓ Balanced' : '✗ Not balanced'}
-                    </span>
                   </div>
                 </div>
 
@@ -672,190 +619,113 @@ export default function AdminStatements() {
 
 function StatementContent({ statement: s, fmt }) {
   const isMonthly = s.period_type === 'monthly'
-  const netSurplus = parseFloat(s.net_surplus || 0)
+  const maxRows = Math.max(
+    s.income_items?.length || 0,
+    s.expenditure_items?.length || 0
+  )
 
   return (
-    <div className="font-mono text-xs text-gray-800 print:text-black">
+    <div className="text-xs text-gray-800 space-y-4">
 
       {/* Header */}
-      <div className="text-center space-y-1 border-b-2 border-gray-800 pb-3 mb-4">
+      <div className="text-center space-y-1 border-b-2 border-gray-800 pb-3">
         <p className="text-base font-bold uppercase tracking-wide">
           Shree Shangharshil Bachat Samuha
         </p>
-        <p className="text-sm font-semibold">Trial Balance</p>
+        <p className="text-sm font-semibold">Receipts and Payments Report</p>
         <p className="text-sm">
           {isMonthly
-            ? `${s.bs_month_name} ${s.bs_year}`
+            ? `${s.bs_month_name} ${s.bs_year} (FY ${s.fiscal_year})`
             : `Fiscal Year ${s.fiscal_year}`
           }
         </p>
       </div>
 
-      {/* Table */}
-      <table className="w-full border-collapse text-xs table-fixed"> 
-        <thead>
-          <tr className="border-b-2 border-gray-800">
-            <th className="text-left py-1.5 pr-2 font-bold w-[55%]">Account</th>
-            <th className="text-right py-1.5 pl-2 font-bold w-[22.5%]">Debit (Rs.)</th>
-            <th className="text-right py-1.5 pl-2 font-bold w-[22.5%]">Credit (Rs.)</th>
-          </tr>
-        </thead>
-        <tbody>
+      {/* Column headers */}
+      <div className="hidden sm:grid grid-cols-2 gap-4 font-bold
+                      border-b border-gray-400 pb-1">
+        <div className="grid grid-cols-2 gap-2">
+          <span>Income</span>
+          <span className="text-right">Amount</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <span>Expenditure</span>
+          <span className="text-right">Amount</span>
+        </div>
+      </div>
 
-          {/* ASSETS */}
-          <tr className="border-b border-gray-300">
-            <td className="py-1.5 pr-2 font-bold uppercase">ASSETS</td>
-            <td className="py-1.5 pl-2"></td>
-            <td className="py-1.5 pl-2"></td>
-          </tr>
-          {(s.line_items?.assets || []).map((item, i) => (
-            <tr key={`a-${i}`} className="border-b border-gray-100">
-              <td className="py-1 pr-2 pl-4">{item.name}</td>
-              <td className="py-1 pl-2 text-right">{fmt(item.debit)}</td>
-              <td className="py-1 pl-2 text-right"></td>
-            </tr>
-          ))}
-          <tr className="border-b border-gray-300 font-bold">
-            <td className="py-1.5 pr-2 pl-4">TOTAL ASSETS</td>
-            <td className="py-1.5 pl-2 text-right">{fmt(s.total_assets)}</td>
-            <td className="py-1.5 pl-2 text-right"></td>
-          </tr>
+      {/* Two column layout — stacked on mobile, side by side on larger */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-4">
 
-          {/* LIABILITIES */}
-          <tr className="border-b border-gray-300">
-            <td className="py-1.5 pr-2 font-bold uppercase">LIABILITIES</td>
-            <td className="py-1.5 pl-2"></td>
-            <td className="py-1.5 pl-2"></td>
-          </tr>
-          {(s.line_items?.liabilities || []).map((item, i) => (
-            <tr key={`l-${i}`} className="border-b border-gray-100">
-              <td className="py-1 pr-2 pl-4">{item.name}</td>
-              <td className="py-1 pl-2 text-right"></td>
-              <td className="py-1 pl-2 text-right">{fmt(item.credit)}</td>
-            </tr>
-          ))}
-          <tr className="border-b border-gray-300 font-bold">
-            <td className="py-1.5 pr-2 pl-4">TOTAL LIABILITIES</td>
-            <td className="py-1.5 pl-2 text-right"></td>
-            <td className="py-1.5 pl-2 text-right">{fmt(s.total_liabilities)}</td>
-          </tr>
-
-          {/* INCOME (if present) */}
-          {(s.line_items?.income || []).length > 0 && (
-            <>
-              <tr className="border-b border-gray-300">
-                <td className="py-1.5 pr-2 font-bold uppercase">INCOME</td>
-                <td className="py-1.5 pl-2"></td>
-                <td className="py-1.5 pl-2"></td>
-              </tr>
-              {(s.line_items?.income || []).map((item, i) => (
-                <tr key={`i-${i}`} className="border-b border-gray-100">
-                  <td className="py-1 pr-2 pl-4">{item.name}</td>
-                  <td className="py-1 pl-2 text-right"></td>
-                  <td className="py-1 pl-2 text-right">{fmt(item.credit)}</td>
-                </tr>
-              ))}
-              <tr className="border-b border-gray-300 font-bold">
-                <td className="py-1.5 pr-2 pl-4">TOTAL INCOME</td>
-                <td className="py-1.5 pl-2 text-right"></td>
-                <td className="py-1.5 pl-2 text-right">{fmt(s.total_income)}</td>
-              </tr>
-            </>
-          )}
-
-          {/* EXPENSES (if present) */}
-          {(s.line_items?.expenses || []).length > 0 && (
-            <>
-              <tr className="border-b border-gray-300">
-                <td className="py-1.5 pr-2 font-bold uppercase">EXPENSES</td>
-                <td className="py-1.5 pl-2"></td>
-                <td className="py-1.5 pl-2"></td>
-              </tr>
-              {(s.line_items?.expenses || []).map((item, i) => (
-                <tr key={`e-${i}`} className="border-b border-gray-100">
-                  <td className="py-1 pr-2 pl-4">{item.name}</td>
-                  <td className="py-1 pl-2 text-right">{fmt(item.debit)}</td>
-                  <td className="py-1 pl-2 text-right"></td>
-                </tr>
-              ))}
-              <tr className="border-b border-gray-300 font-bold">
-                <td className="py-1.5 pr-2 pl-4">TOTAL EXPENSES</td>
-                <td className="py-1.5 pl-2 text-right">{fmt(s.total_expenses)}</td>
-                <td className="py-1.5 pl-2 text-right"></td>
-              </tr>
-            </>
-          )}
-
-          {/* EQUITY */}
-          <tr className="border-b border-gray-300">
-            <td className="py-1.5 pr-2 font-bold uppercase">EQUITY</td>
-            <td className="py-1.5 pl-2"></td>
-            <td className="py-1.5 pl-2"></td>
-          </tr>
-          <tr className="border-b border-gray-100">
-            <td className="py-1 pr-2 pl-4">Opening Equity</td>
-            <td className="py-1 pl-2 text-right"></td>
-            <td className="py-1 pl-2 text-right">{fmt(s.opening_equity)}</td>
-          </tr>
-          <tr className="border-b border-gray-100">
-            <td className="py-1 pr-2 pl-4">
-              Net {netSurplus >= 0 ? 'Surplus' : 'Deficit'}
-            </td>
-            <td className="py-1 pl-2 text-right">
-              {netSurplus < 0 ? fmt(Math.abs(netSurplus)) : ''}
-            </td>
-            <td className="py-1 pl-2 text-right">
-              {netSurplus >= 0 ? fmt(netSurplus) : ''}
-            </td>
-          </tr>
-          <tr className="border-b border-gray-300 font-bold">
-            <td className="py-1.5 pr-2 pl-4">TOTAL EQUITY</td>
-            <td className="py-1.5 pl-2 text-right"></td>
-            <td className="py-1.5 pl-2 text-right">{fmt(s.closing_equity)}</td>
-          </tr>
-
-          {/* GRAND TOTAL */}
-          <tr className="border-t-2 border-gray-800 font-bold">
-            <td className="py-2 pr-2">GRAND TOTAL</td>
-            <td className="py-2 pl-2 text-right">{fmt(s.line_items?.totals?.debit)}</td>
-            <td className="py-2 pl-2 text-right">{fmt(s.line_items?.totals?.credit)}</td>
-          </tr>
-
-          {/* Balanced / Difference */}
-          {s.is_balanced ? (
-            <tr>
-              <td className="py-1 pr-2 text-green-700 font-bold">✓ BALANCED</td>
-              <td className="py-1 pl-2"></td>
-              <td className="py-1 pl-2"></td>
-            </tr>
-          ) : (
-            <tr className="text-red-600">
-              <td className="py-1 pr-2">Difference</td>
-              <td className="py-1 pl-2 text-right">{fmt(s.difference)}</td>
-              <td className="py-1 pl-2"></td>
-            </tr>
-          )}
-
-        </tbody>
-      </table>
-
-      {/* Signature Lines */}
-      <div className="mt-8 pt-4 border-t border-gray-300">
-        <div className="grid grid-cols-3 gap-8 text-center">
-          <div>
-            <div className="border-b border-gray-400 pb-8 mb-1"></div>
-            <p className="text-xs font-medium">Prepared by</p>
+        {/* Income column */}
+        <div>
+          <p className="font-bold uppercase border-b-2 border-gray-700
+                        pb-1 mb-2 sm:hidden">
+            Income
+          </p>
+          <div className="space-y-1">
+            {(s.income_items || []).length === 0 ? (
+              <p className="text-gray-400 italic">No entries</p>
+            ) : s.income_items.map((item, i) => (
+              <div key={i} className="flex justify-between gap-2">
+                <span className="truncate">{item.name}</span>
+                <span className="flex-shrink-0">{fmt(item.amount)}</span>
+              </div>
+            ))}
           </div>
-          <div>
-            <div className="border-b border-gray-400 pb-8 mb-1"></div>
-            <p className="text-xs font-medium">Approved by</p>
+          <div className="flex justify-between gap-2 font-bold
+                          border-t-2 border-gray-700 mt-2 pt-1.5">
+            <span>Total Income</span>
+            <span>{fmt(s.total_income)}</span>
           </div>
-          <div>
-            <div className="border-b border-gray-400 pb-8 mb-1"></div>
-            <p className="text-xs font-medium">Date</p>
+        </div>
+
+        {/* Expenditure column */}
+        <div>
+          <p className="font-bold uppercase border-b-2 border-gray-700
+                        pb-1 mb-2 sm:hidden">
+            Expenditure
+          </p>
+          <div className="space-y-1">
+            {(s.expenditure_items || []).length === 0 ? (
+              <p className="text-gray-400 italic">No entries</p>
+            ) : s.expenditure_items.map((item, i) => (
+              <div key={i} className="flex justify-between gap-2">
+                <span className="truncate">{item.name}</span>
+                <span className="flex-shrink-0">{fmt(item.amount)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-between gap-2 font-bold
+                          border-t-2 border-gray-700 mt-2 pt-1.5">
+            <span>Total Expenditure</span>
+            <span>{fmt(s.total_expenditure)}</span>
+          </div>
+        </div>
+
+      </div>
+
+      {/* Signature section */}
+      <div className="border-t border-gray-300 pt-8 mt-8">
+        <div className="grid grid-cols-3 gap-6">
+          <div className="text-center">
+            <div className="border-t border-gray-500 pt-1 mt-10">
+              <p className="font-medium">Prepared By</p>
+            </div>
+          </div>
+          <div className="text-center">
+            <div className="border-t border-gray-500 pt-1 mt-10">
+              <p className="font-medium">Verified By</p>
+            </div>
+          </div>
+          <div className="text-center">
+            <div className="border-t border-gray-500 pt-1 mt-10">
+              <p className="font-medium">Date</p>
+            </div>
           </div>
         </div>
       </div>
+
     </div>
   )
 }
