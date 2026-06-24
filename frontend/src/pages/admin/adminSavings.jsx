@@ -43,6 +43,23 @@ export default function AdminSavings() {
   // cash/bank accounts from useAccounts hook
   const { accounts: cashAccounts } = useAccounts()
 
+  // ── report tab state ──────────────────────────────────────────────────────
+  const [activeTab,     setActiveTab]     = useState('accounts')  // 'accounts' | 'report'
+
+  const [reportFilters, setReportFilters] = useState({
+    member_id:   '',
+    fiscal_year: '',
+    bs_year:     '',
+    bs_month:    '',
+    type:        '',
+  })
+  const [reportData,    setReportData]    = useState(null)
+  const [reportLoad,    setReportLoad]    = useState(false)
+  const [reportErr,     setReportErr]     = useState('')
+
+  const [fiscalYears,   setFiscalYears]   = useState([])
+  const [monthOptions,  setMonthOptions]  = useState([])
+
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
@@ -71,6 +88,93 @@ export default function AdminSavings() {
     } finally {
       setTxnLoading(false)
     }
+  }
+
+  useEffect(() => {
+    fetchFiscalYears()
+  }, [])
+
+  async function fetchFiscalYears() {
+    try {
+      const res = await api.get('/fiscal-years/')
+      setFiscalYears(res.data.fiscal_years || [])
+    } catch {}
+  }
+
+  async function fetchMonthsForFY(fy) {
+    if (!fy) { setMonthOptions([]); return }
+    try {
+      const res = await api.get(`/fiscal-years/months/?fy=${fy}`)
+      setMonthOptions(res.data.months || [])
+    } catch { setMonthOptions([]) }
+  }
+
+  async function fetchReport() {
+    setReportLoad(true)
+    setReportErr('')
+    try {
+      const params = new URLSearchParams()
+      if (reportFilters.member_id)   params.append('member',       reportFilters.member_id)
+      if (reportFilters.fiscal_year) params.append('fiscal_year',  reportFilters.fiscal_year)
+      if (reportFilters.bs_month)    params.append('bs_month',     reportFilters.bs_month)
+      if (reportFilters.bs_year)     params.append('bs_year',      reportFilters.bs_year)
+      if (reportFilters.type)        params.append('type',         reportFilters.type)
+
+      const res = await api.get(`/savings/report/?${params.toString()}`)
+      setReportData(res.data)
+    } catch (err) {
+      setReportErr(err.response?.data?.error || 'Failed to load report.')
+    } finally {
+      setReportLoad(false)
+    }
+  }
+
+  async function handleDownloadSavingsExcel() {
+    if (!reportData) return
+    try {
+      const XLSX = await import('xlsx')
+      const wb   = XLSX.utils.book_new()
+      const rows = buildSavingsExcelRows(reportData)
+      const ws   = XLSX.utils.aoa_to_sheet(rows)
+      ws['!cols'] = [
+        { wch: 14 }, { wch: 22 }, { wch: 16 }, { wch: 14 }, { wch: 20 }
+      ]
+      XLSX.utils.book_append_sheet(wb, ws, 'Savings Report')
+      XLSX.writeFile(wb, `savings_report.xlsx`)
+    } catch {
+      setReportErr('Failed to download.')
+    }
+  }
+
+  function buildSavingsExcelRows(data) {
+    const f = (n) => parseFloat(n || 0).toFixed(2)
+    const rows = []
+    rows.push(['Shree SHANGHARSHIL BACHAT SAMUHA', '', '', '', ''])
+    rows.push(['Savings Report', '', '', '', ''])
+    if (data.filters.fiscal_year) rows.push([`Fiscal Year: ${data.filters.fiscal_year}`, '', '', '', ''])
+    rows.push(['', '', '', '', ''])
+    rows.push(['Date (BS)', 'Member', 'Type', 'Amount (Rs.)', 'Note'])
+    rows.push(['', '', '', '', ''])
+
+    for (const r of data.rows) {
+      rows.push([
+        r.nepali_date ? formatBS(r.nepali_date) : toBS(r.date_ad),
+        r.member_name,
+        r.type_label,
+        f(r.amount),
+        r.note || '',
+      ])
+    }
+
+    rows.push(['', '', '', '', ''])
+    rows.push(['SUMMARY', '', '', '', ''])
+    rows.push(['Total Deposits',    '', '', f(data.summary.total_deposits),    ''])
+    rows.push(['Total Withdrawals', '', '', f(data.summary.total_withdrawals), ''])
+    rows.push(['Total Interest',    '', '', f(data.summary.total_interest),    ''])
+    rows.push(['Total Penalty',     '', '', f(data.summary.total_penalty),     ''])
+    rows.push(['Total Rows',        '', '', data.summary.total_rows,           ''])
+
+    return rows
   }
 
   function selectAccount(acc) {
@@ -312,6 +416,24 @@ export default function AdminSavings() {
             </button>
           </div>
         </div>
+        {/* Tab switcher */}
+        <div className="flex border-b border-gray-200 mt-2">
+          {[
+            { key: 'accounts', label: 'Accounts'      },
+            { key: 'report',   label: 'Savings Report' },
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors
+                ${activeTab === tab.key
+                  ? 'border-primary-600 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
 
         {successMsg && (
           <div className="px-4 py-3 bg-green-50 border border-green-200
@@ -325,7 +447,8 @@ export default function AdminSavings() {
             {error}
           </div>
         )}
-
+        {activeTab === 'accounts' && (
+          <>
         <input
           type="text"
           className="input-field max-w-sm"
@@ -481,8 +604,262 @@ export default function AdminSavings() {
               </>
             )}
           </div>
+          </div>
+          </>
+        )}
+        {activeTab === 'report' && (
+          <div className="space-y-4">
 
-        </div>
+            {/* Filter panel */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+              <h3 className="text-sm font-semibold text-gray-700 mb-4">
+                Filter transactions
+              </h3>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+                {/* Member filter */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Member (optional)
+                  </label>
+                  <select
+                    className="input-field text-sm"
+                    value={reportFilters.member_id}
+                    onChange={(e) => setReportFilters({
+                      ...reportFilters, member_id: e.target.value
+                    })}>
+                    <option value="">All members</option>
+                    {members.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.full_name || m.email}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Fiscal year filter */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Fiscal Year (optional)
+                  </label>
+                  <select
+                    className="input-field text-sm"
+                    value={reportFilters.fiscal_year}
+                    onChange={(e) => {
+                      const fy = e.target.value
+                      setReportFilters({
+                        ...reportFilters, fiscal_year: fy,
+                        bs_year: '', bs_month: ''
+                      })
+                      fetchMonthsForFY(fy)
+                    }}>
+                    <option value="">All years</option>
+                    {fiscalYears.map(fy => (
+                      <option key={fy} value={fy}>{fy}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Month filter — only enabled after fiscal year selected */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Month (optional)
+                  </label>
+                  <select
+                    className="input-field text-sm"
+                    value={reportFilters.bs_month && reportFilters.bs_year
+                      ? `${reportFilters.bs_year}-${reportFilters.bs_month}` : ''}
+                    onChange={(e) => {
+                      if (!e.target.value) {
+                        setReportFilters({ ...reportFilters, bs_year: '', bs_month: '' })
+                        return
+                      }
+                      const [y, m] = e.target.value.split('-')
+                      setReportFilters({ ...reportFilters, bs_year: y, bs_month: m })
+                    }}
+                    disabled={!reportFilters.fiscal_year}>
+                    <option value="">All months</option>
+                    {monthOptions.map(m => (
+                      <option key={`${m.bs_year}-${m.bs_month}`}
+                        value={`${m.bs_year}-${m.bs_month}`}>
+                        {m.month_name} {m.bs_year}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Transaction type filter */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Type (optional)
+                  </label>
+                  <select
+                    className="input-field text-sm"
+                    value={reportFilters.type}
+                    onChange={(e) => setReportFilters({
+                      ...reportFilters, type: e.target.value
+                    })}>
+                    <option value="">All types</option>
+                    <option value="deposit">Deposit</option>
+                    <option value="withdrawal">Withdrawal</option>
+                    <option value="interest_credit">Interest</option>
+                    <option value="penalty">Penalty</option>
+                  </select>
+                </div>
+
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-2 mt-4 flex-wrap">
+                <button
+                  onClick={fetchReport}
+                  disabled={reportLoad}
+                  className="btn-primary text-sm">
+                  {reportLoad ? 'Loading...' : '🔍 Generate report'}
+                </button>
+                <button
+                  onClick={() => {
+                    setReportFilters({
+                      member_id: '', fiscal_year: '', bs_year: '',
+                      bs_month: '', type: '',
+                    })
+                    setReportData(null)
+                    setMonthOptions([])
+                  }}
+                  className="btn-secondary text-sm">
+                  Clear filters
+                </button>
+                {reportData && (
+                  <>
+                    <button
+                      onClick={() => window.print()}
+                      className="btn-secondary text-sm">
+                      🖨 Print
+                    </button>
+                    <button
+                      onClick={handleDownloadSavingsExcel}
+                      className="btn-secondary text-sm">
+                      ⬇ Excel
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {reportErr && (
+                <div className="mt-3 px-4 py-3 bg-red-50 border border-red-200
+                                text-red-700 rounded-lg text-sm">
+                  {reportErr}
+                </div>
+              )}
+            </div>
+
+            {/* Results */}
+            {reportData && (
+              <div className="print-area">
+
+                {/* Summary cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                  {[
+                    { label: 'Total Deposits',    value: reportData.summary.total_deposits,    color: 'text-emerald-700', bg: 'bg-emerald-50 border-emerald-100' },
+                    { label: 'Total Withdrawals', value: reportData.summary.total_withdrawals, color: 'text-red-600',     bg: 'bg-red-50 border-red-100'         },
+                    { label: 'Total Interest',    value: reportData.summary.total_interest,    color: 'text-blue-700',    bg: 'bg-blue-50 border-blue-100'        },
+                    { label: 'Total Penalty',     value: reportData.summary.total_penalty,     color: 'text-amber-700',   bg: 'bg-amber-50 border-amber-100'      },
+                  ].map(card => (
+                    <div key={card.label}
+                      className={`rounded-xl border p-3 sm:p-4 ${card.bg}`}>
+                      <p className="text-xs text-gray-500 font-medium truncate">
+                        {card.label}
+                      </p>
+                      <p className={`text-sm sm:text-base font-bold mt-0.5 ${card.color}`}>
+                        {fmt(card.value)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Table */}
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100
+                                overflow-hidden">
+                  <div className="px-5 py-3 border-b border-gray-100 flex items-center
+                                  justify-between">
+                    <p className="text-sm font-semibold text-gray-700">
+                      {reportData.summary.total_rows} transaction
+                      {reportData.summary.total_rows !== 1 ? 's' : ''}
+                    </p>
+                  </div>
+
+                  {reportData.rows.length === 0 ? (
+                    <div className="px-5 py-12 text-center text-gray-400 text-sm">
+                      No transactions found for the selected filters.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm min-w-[500px]">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                          <tr>
+                            {['Date (BS)', 'Member', 'Type', 'Amount', 'Note'].map(h => (
+                              <th key={h}
+                                className="px-4 py-3 text-left text-xs font-semibold
+                                          text-gray-500 uppercase tracking-wide">
+                                {h}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {reportData.rows.map((row, i) => (
+                            <tr key={`${row.source}-${row.id}-${i}`}
+                              className="hover:bg-gray-50 transition-colors">
+                              <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                                {row.nepali_date
+                                  ? toBS(row.nepali_date)
+                                  : toBS(row.date_ad)
+                                }
+                              </td>
+                              <td className="px-4 py-3 font-medium text-gray-800">
+                                {row.member_name}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`inline-flex items-center px-2 py-0.5
+                                                  rounded-full text-xs font-medium
+                                  ${row.type === 'deposit'
+                                    ? 'bg-emerald-100 text-emerald-700'
+                                    : row.type === 'withdrawal'
+                                      ? 'bg-red-100 text-red-700'
+                                      : row.type === 'interest_credit'
+                                        ? 'bg-blue-100 text-blue-700'
+                                        : 'bg-amber-100 text-amber-700'
+                                  }`}>
+                                  {row.type_label}
+                                </span>
+                              </td>
+                              <td className={`px-4 py-3 font-semibold whitespace-nowrap
+                                ${row.type === 'withdrawal'
+                                  ? 'text-red-600'
+                                  : row.type === 'penalty'
+                                    ? 'text-amber-700'
+                                    : 'text-emerald-700'
+                                }`}>
+                                {row.type === 'withdrawal' ? '-' : '+'}
+                                {fmt(row.amount)}
+                              </td>
+                              <td className="px-4 py-3 text-gray-500 text-xs max-w-xs truncate">
+                                {row.note || '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+            )}
+
+          </div>
+        )}
       </div>
 
       {/* Create account modal */}

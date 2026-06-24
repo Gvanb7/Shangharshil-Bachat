@@ -74,6 +74,20 @@ export default function AdminLoans() {
   const [borrowerLoanErr,  setBorrowerLoanErr]  = useState('')
   const [borrowerLoanLoad, setBorrowerLoanLoad] = useState(false)
 
+  // ── report tabs ───────────────────────────────────────────────────────────
+  const [activeTab,      setActiveTab]      = useState('loans')  // 'loans'|'member_report'|'borrower_report'
+
+  // shared report state
+  const [reportFilters,  setReportFilters]  = useState({
+    person_id: '', fiscal_year: '', bs_year: '', bs_month: '', type: ''
+  })
+  const [reportData,     setReportData]     = useState(null)
+  const [reportLoad,     setReportLoad]     = useState(false)
+  const [reportErr,      setReportErr]      = useState('')
+  const [fiscalYears,    setFiscalYears]    = useState([])
+  const [monthOptions,   setMonthOptions]   = useState([])
+  const [personOptions,  setPersonOptions]  = useState([])  // members or borrowers
+
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
@@ -90,6 +104,113 @@ export default function AdminLoans() {
     } finally {
       setLoading(false)
     }
+  }
+
+  useEffect(() => {
+    fetchFiscalYearsForReport()
+  }, [])
+
+  async function fetchFiscalYearsForReport() {
+    try {
+      const res = await api.get('/fiscal-years/')
+      setFiscalYears(res.data.fiscal_years || [])
+    } catch {}
+  }
+
+  async function fetchMonthsForReport(fy) {
+    if (!fy) { setMonthOptions([]); return }
+    try {
+      const res = await api.get(`/fiscal-years/months/?fy=${fy}`)
+      setMonthOptions(res.data.months || [])
+    } catch { setMonthOptions([]) }
+  }
+
+  async function fetchPersonOptions(kind) {
+    try {
+      if (kind === 'member') {
+        const res = await api.get('/admin/members/')
+        setPersonOptions(res.data.filter(m => m.is_active))
+      } else {
+        const res = await api.get('/borrowers/')
+        setPersonOptions(res.data)
+      }
+    } catch { setPersonOptions([]) }
+  }
+
+  async function fetchLoanReport(kind) {
+    setReportLoad(true)
+    setReportErr('')
+    try {
+      const params = new URLSearchParams()
+      params.append('kind', kind)
+      if (reportFilters.person_id)   params.append('person',       reportFilters.person_id)
+      if (reportFilters.fiscal_year) params.append('fiscal_year',  reportFilters.fiscal_year)
+      if (reportFilters.bs_month)    params.append('bs_month',     reportFilters.bs_month)
+      if (reportFilters.bs_year)     params.append('bs_year',      reportFilters.bs_year)
+      if (reportFilters.type)        params.append('type',         reportFilters.type)
+
+      const res = await api.get(`/loans/report/?${params.toString()}`)
+      setReportData(res.data)
+    } catch (err) {
+      setReportErr(err.response?.data?.error || 'Failed to load report.')
+    } finally {
+      setReportLoad(false)
+    }
+  }
+
+  async function handleDownloadLoanExcel(kind) {
+    if (!reportData) return
+    try {
+      const XLSX = await import('xlsx')
+      const wb   = XLSX.utils.book_new()
+      const rows = buildLoanExcelRows(reportData, kind)
+      const ws   = XLSX.utils.aoa_to_sheet(rows)
+      ws['!cols'] = [
+        { wch: 14 }, { wch: 22 }, { wch: 16 },
+        { wch: 14 }, { wch: 14 }, { wch: 14 },
+      ]
+      XLSX.utils.book_append_sheet(wb, ws, 'Loans Report')
+      XLSX.writeFile(wb, `loans_report_${kind}.xlsx`)
+    } catch {
+      setReportErr('Failed to download.')
+    }
+  }
+
+  function buildLoanExcelRows(data, kind) {
+    const f    = (n) => parseFloat(n || 0).toFixed(2)
+    const rows = []
+
+    rows.push(['SHANGHARSHIL YUVA BACHAT SAMUHA', '', '', '', '', ''])
+    rows.push([
+      `Loans Report — ${kind === 'member' ? 'Members' : 'Non-Members'}`,
+      '', '', '', '', ''
+    ])
+    if (data.filters.fiscal_year) {
+      rows.push([`Fiscal Year: ${data.filters.fiscal_year}`, '', '', '', '', ''])
+    }
+    rows.push(['', '', '', '', '', ''])
+    rows.push(['Date (BS)', 'Name', 'Type', 'Principal (Rs.)', 'Interest (Rs.)', 'Penalty (Rs.)'])
+    rows.push(['', '', '', '', '', ''])
+
+    for (const r of data.rows) {
+      rows.push([
+        r.nepali_date ? formatBS(r.nepali_date) : toBS(r.date_ad),
+        r.name,
+        r.type_label,
+        f(r.principal),
+        f(r.interest),
+        f(r.penalty),
+      ])
+    }
+
+    rows.push(['', '', '', '', '', ''])
+    rows.push(['SUMMARY', '', '', '', '', ''])
+    rows.push(['Total Disbursed',         '', '', f(data.summary.total_disbursed),        '', ''])
+    rows.push(['Total Principal Repaid',  '', '', f(data.summary.total_principal_repaid), '', ''])
+    rows.push(['Total Interest Collected','', '', '',  f(data.summary.total_interest),    ''])
+    rows.push(['Total Penalty Collected', '', '', '',  '', f(data.summary.total_penalty) ])
+
+    return rows
   }
 
   async function fetchRepayments(loanId) {
@@ -208,9 +329,6 @@ export default function AdminLoans() {
     }
 
   async function handleReject(loan) {
-    if (!window.confirm(
-      `Reject loan of Rs. ${loan.principal} for ${loan.member_name}?`
-    )) return
     try {
       await api.post(`/loans/${loan.id}/reject/`)
       flash('Loan rejected.')
@@ -445,12 +563,43 @@ export default function AdminLoans() {
           </button>
         </div>
 
+        {/* Tab switcher */}
+        <div className="flex border-b border-gray-200 mt-2">
+          {[
+            { key: 'loans',           label: 'Loans'           },
+            { key: 'member_report',   label: 'Member Report'   },
+            { key: 'borrower_report', label: 'Borrower Report' },
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => {
+                setActiveTab(tab.key)
+                setReportData(null)
+                setReportErr('')
+                setReportFilters({
+                  person_id: '', fiscal_year: '', bs_year: '', bs_month: '', type: ''
+                })
+                setMonthOptions([])
+                if (tab.key === 'member_report')   fetchPersonOptions('member')
+                if (tab.key === 'borrower_report') fetchPersonOptions('borrower')
+              }}
+              className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors
+                ${activeTab === tab.key
+                  ? 'border-primary-600 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
         {successMsg && (
           <div className="px-4 py-3 bg-green-50 border border-green-200
                           text-green-700 rounded-lg text-sm">
             {successMsg}
           </div>
         )}
+
         {error && (
           <div className="px-4 py-3 bg-red-50 border border-red-200
                           text-red-700 rounded-lg text-sm">
@@ -484,11 +633,11 @@ export default function AdminLoans() {
           />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-          {/* Loans list */}
-          <div className="card overflow-hidden">
-            <div className="card-header">
+        {activeTab === 'loans' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Loans list */}
+            <div className="card overflow-hidden">
+              <div className="card-header">
               <h3 className="font-semibold text-gray-800 text-sm">
                 {filtered.length} loan{filtered.length !== 1 ? 's' : ''}
               </h3>
@@ -570,30 +719,309 @@ export default function AdminLoans() {
 
           {/* Loan detail panel */}
           <div className="card overflow-hidden">
-            {!selected ? (
-              <div className="flex items-center justify-center h-48
-                              text-gray-400 text-sm">
-                ← Select a loan to view details
+              {!selected ? (
+                <div className="flex items-center justify-center h-48
+                                text-gray-400 text-sm">
+                  ← Select a loan to view details
+                </div>
+              ) : (
+                <LoanDetailPanel
+                  selected={selected}
+                  repayments={repayments}
+                  repayLoad={repayLoad}
+                  accounts={accounts}
+                  onRepay={() => {
+                    fetchAll()
+                    fetchRepayments(selected.id)
+                    api.get(`/loans/${selected.id}/`).then(res => setSelected(res.data))
+                  }}
+                  fmt={fmt}
+                  STATUS_BADGE={STATUS_BADGE}
+                />
+              )}
+            </div>
+
+        </div>
+      )}
+
+      {(activeTab === 'member_report' || activeTab === 'borrower_report') && (
+        <div className="space-y-4">
+          {/* Filter panel */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <h3 className="text-sm font-semibold text-gray-700 mb-4">
+              Filter loan transactions —{' '}
+              {activeTab === 'member_report' ? 'Members' : 'Non-Members'}
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+              {/* Person filter */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  {activeTab === 'member_report' ? 'Member' : 'Borrower'} (optional)
+                </label>
+                <select
+                  className="input-field text-sm"
+                  value={reportFilters.person_id}
+                  onChange={(e) => setReportFilters({
+                    ...reportFilters, person_id: e.target.value
+                  })}>
+                  <option value="">
+                    All {activeTab === 'member_report' ? 'members' : 'borrowers'}
+                  </option>
+                  {personOptions.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.full_name || p.email}
+                    </option>
+                  ))}
+                </select>
               </div>
-            ) : (
-              <LoanDetailPanel
-                selected={selected}
-                repayments={repayments}
-                repayLoad={repayLoad}
-                accounts={accounts}
-                onRepay={() => {
-                  fetchAll()
-                  fetchRepayments(selected.id)
-                  api.get(`/loans/${selected.id}/`).then(res => setSelected(res.data))
+
+              {/* Fiscal year */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Fiscal Year (optional)
+                </label>
+                <select
+                  className="input-field text-sm"
+                  value={reportFilters.fiscal_year}
+                  onChange={(e) => {
+                    const fy = e.target.value
+                    setReportFilters({
+                      ...reportFilters, fiscal_year: fy,
+                      bs_year: '', bs_month: ''
+                    })
+                    fetchMonthsForReport(fy)
+                  }}>
+                  <option value="">All years</option>
+                  {fiscalYears.map(fy => (
+                    <option key={fy} value={fy}>{fy}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Month */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Month (optional)
+                </label>
+                <select
+                  className="input-field text-sm"
+                  value={reportFilters.bs_month && reportFilters.bs_year
+                    ? `${reportFilters.bs_year}-${reportFilters.bs_month}` : ''}
+                  onChange={(e) => {
+                    if (!e.target.value) {
+                      setReportFilters({ ...reportFilters, bs_year: '', bs_month: '' })
+                      return
+                    }
+                    const [y, m] = e.target.value.split('-')
+                    setReportFilters({ ...reportFilters, bs_year: y, bs_month: m })
+                  }}
+                  disabled={!reportFilters.fiscal_year}>
+                  <option value="">All months</option>
+                  {monthOptions.map(m => (
+                    <option key={`${m.bs_year}-${m.bs_month}`}
+                      value={`${m.bs_year}-${m.bs_month}`}>
+                      {m.month_name} {m.bs_year}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Type */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Type (optional)
+                </label>
+                <select
+                  className="input-field text-sm"
+                  value={reportFilters.type}
+                  onChange={(e) => setReportFilters({
+                    ...reportFilters, type: e.target.value
+                  })}>
+                  <option value="">All types</option>
+                  <option value="disbursement">Disbursement</option>
+                  <option value="repayment">Repayment</option>
+                  <option value="penalty">Penalty collected</option>
+                </select>
+              </div>
+
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2 mt-4 flex-wrap">
+              <button
+                onClick={() => fetchLoanReport(
+                  activeTab === 'member_report' ? 'member' : 'borrower'
+                )}
+                disabled={reportLoad}
+                className="btn-primary text-sm">
+                {reportLoad ? 'Loading...' : '🔍 Generate report'}
+              </button>
+              <button
+                onClick={() => {
+                  setReportFilters({
+                    person_id: '', fiscal_year: '', bs_year: '',
+                    bs_month: '', type: '',
+                  })
+                  setReportData(null)
+                  setMonthOptions([])
                 }}
-                fmt={fmt}
-                STATUS_BADGE={STATUS_BADGE}
-              />
+                className="btn-secondary text-sm">
+                Clear filters
+              </button>
+              {reportData && (
+                <>
+                  <button
+                    onClick={() => window.print()}
+                    className="btn-secondary text-sm">
+                    🖨 Print
+                  </button>
+                  <button
+                    onClick={() => handleDownloadLoanExcel(
+                      activeTab === 'member_report' ? 'member' : 'borrower'
+                    )}
+                    className="btn-secondary text-sm">
+                    ⬇ Excel
+                  </button>
+                </>
+              )}
+            </div>
+
+            {reportErr && (
+              <div className="mt-3 px-4 py-3 bg-red-50 border border-red-200
+                              text-red-700 rounded-lg text-sm">
+                {reportErr}
+              </div>
             )}
           </div>
 
+          {/* Results */}
+          {reportData && (
+            <div className="print-area space-y-4">
+
+              {/* Summary cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  {
+                    label: 'Total Disbursed',
+                    value: reportData.summary.total_disbursed,
+                    color: 'text-blue-700',
+                    bg:    'bg-blue-50 border-blue-100',
+                  },
+                  {
+                    label: 'Principal Repaid',
+                    value: reportData.summary.total_principal_repaid,
+                    color: 'text-emerald-700',
+                    bg:    'bg-emerald-50 border-emerald-100',
+                  },
+                  {
+                    label: 'Interest Collected',
+                    value: reportData.summary.total_interest,
+                    color: 'text-purple-700',
+                    bg:    'bg-purple-50 border-purple-100',
+                  },
+                  {
+                    label: 'Penalty Collected',
+                    value: reportData.summary.total_penalty,
+                    color: 'text-amber-700',
+                    bg:    'bg-amber-50 border-amber-100',
+                  },
+                ].map(card => (
+                  <div key={card.label}
+                    className={`rounded-xl border p-3 sm:p-4 ${card.bg}`}>
+                    <p className="text-xs text-gray-500 font-medium truncate">
+                      {card.label}
+                    </p>
+                    <p className={`text-sm sm:text-base font-bold mt-0.5 ${card.color}`}>
+                      {fmt(card.value)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Table */}
+              <div className="bg-white rounded-2xl shadow-sm border
+                              border-gray-100 overflow-hidden">
+                <div className="px-5 py-3 border-b border-gray-100">
+                  <p className="text-sm font-semibold text-gray-700">
+                    {reportData.summary.total_rows} transaction
+                    {reportData.summary.total_rows !== 1 ? 's' : ''}
+                  </p>
+                </div>
+
+                {reportData.rows.length === 0 ? (
+                  <div className="px-5 py-12 text-center text-gray-400 text-sm">
+                    No transactions found for the selected filters.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm min-w-[600px]">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          {[
+                            'Date (BS)', 'Name', 'Type',
+                            'Principal', 'Interest', 'Penalty'
+                          ].map(h => (
+                            <th key={h}
+                              className="px-4 py-3 text-left text-xs font-semibold
+                                        text-gray-500 uppercase tracking-wide">
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {reportData.rows.map((row, i) => (
+                          <tr key={i}
+                            className="hover:bg-gray-50 transition-colors">
+                            <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                              {row.nepali_date
+                                ? formatBS(row.nepali_date)
+                                : toBS(row.date_ad)
+                              }
+                            </td>
+                            <td className="px-4 py-3 font-medium text-gray-800">
+                              {row.name}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`inline-flex items-center px-2 py-0.5
+                                                rounded-full text-xs font-medium
+                                ${row.type === 'disbursement'
+                                  ? 'bg-blue-100 text-blue-700'
+                                  : row.type === 'repayment'
+                                    ? 'bg-emerald-100 text-emerald-700'
+                                    : 'bg-amber-100 text-amber-700'
+                                }`}>
+                                {row.type_label}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-gray-800 whitespace-nowrap">
+                              {parseFloat(row.principal) > 0
+                                ? fmt(row.principal) : '—'}
+                            </td>
+                            <td className="px-4 py-3 text-purple-700 whitespace-nowrap">
+                              {parseFloat(row.interest) > 0
+                                ? fmt(row.interest) : '—'}
+                            </td>
+                            <td className="px-4 py-3 text-amber-700 whitespace-nowrap">
+                              {parseFloat(row.penalty) > 0
+                                ? fmt(row.penalty) : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
+      )}
       </div>
+  
+
 
       {/* Create loan modal */}
       {showCreate && (

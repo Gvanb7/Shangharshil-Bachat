@@ -12,6 +12,7 @@ urlpatterns = [
     path('savings/<uuid:account_id>/withdraw/', views.AdminWithdrawView.as_view()),
     path('savings/<uuid:account_id>/transactions/', views.AdminTransactionListView.as_view()),
     path('savings/<uuid:account_id>/penalty/', views.AdminApplySavingsPenaltyView.as_view()),
+    path('savings/report/', views.AdminSavingsReportView.as_view()),
     
     path('penalties/', views.AdminPenaltyListView.as_view()),
 
@@ -29,6 +30,7 @@ urlpatterns = [
     path('loans/<uuid:loan_id>/repayments/', views.AdminLoanRepaymentListView.as_view()),
     path('loans/<uuid:loan_id>/schedule/', views.AdminLoanScheduleView.as_view()),
     path('loans/<uuid:loan_id>/penalty/', views.AdminApplyLoanPenaltyView.as_view()),
+    path('loans/report/', views.AdminLoansReportView.as_view()),
 
     # ── Member loans ────────────────────────────────────────────────────
     path('member/loans/', views.MemberLoanView.as_view()),

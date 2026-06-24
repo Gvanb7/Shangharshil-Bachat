@@ -92,6 +92,139 @@ class AdminSavingsAccountDetailView(APIView):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=400)
+    
+class AdminSavingsReportView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        from .models import SavingsTransaction, Penalty, SavingsAccount
+        from .bs_calendar import get_bs_month_ad_range, get_fiscal_year_ad_range
+        from django.db.models import Sum, Q
+        import datetime
+
+        # ── filters from query params ─────────────────────────────────────
+        member_id    = request.query_params.get('member')
+        fiscal_year  = request.query_params.get('fiscal_year')
+        bs_month     = request.query_params.get('bs_month')
+        bs_year      = request.query_params.get('bs_year')
+        txn_type     = request.query_params.get('type')  # deposit/withdrawal/interest_credit/penalty
+
+        # ── determine date range ──────────────────────────────────────────
+        start_ad = None
+        end_ad   = None
+
+        if fiscal_year and bs_month and bs_year:
+            # specific month within a fiscal year
+            start_ad, end_ad = get_bs_month_ad_range(int(bs_year), int(bs_month))
+        elif fiscal_year:
+            # entire fiscal year
+            start_ad, end_ad = get_fiscal_year_ad_range(fiscal_year)
+
+        # ── build savings transactions queryset ──────────────────────────
+        txns = SavingsTransaction.objects.select_related(
+            'account__member'
+        ).all()
+
+        if member_id:
+            txns = txns.filter(account__member__id=member_id)
+
+        if start_ad and end_ad:
+            txns = txns.filter(
+                created_at__date__gte=start_ad,
+                created_at__date__lte=end_ad,
+            )
+
+        if txn_type == 'penalty':
+            txns = SavingsTransaction.objects.none()
+        elif txn_type:
+            txns = txns.filter(type=txn_type)
+
+        txns = txns.order_by('created_at')
+
+        # ── build penalties queryset ──────────────────────────────────────
+        penalties = Penalty.objects.filter(
+            penalty_type='savings'
+        ).select_related('member', 'savings_account__member')
+
+        if member_id:
+            penalties = penalties.filter(member__id=member_id)
+
+        if start_ad and end_ad:
+            # penalty uses nepali_date string — filter via created_at
+            penalties = penalties.filter(
+                created_at__date__gte=start_ad,
+                created_at__date__lte=end_ad,
+            )
+
+        if txn_type and txn_type != 'penalty':
+            penalties = Penalty.objects.none()
+
+        penalties = penalties.order_by('created_at')
+
+        # ── build rows ────────────────────────────────────────────────────
+        rows = []
+
+        for t in txns:
+            member = t.account.member
+            rows.append({
+                'id':          str(t.id),
+                'date_ad':     t.created_at.date().isoformat(),
+                'nepali_date': '',   # SavingsTransaction doesn't store nepali_date yet — use AD
+                'member_name': member.full_name or member.email,
+                'type':        t.type,
+                'type_label':  t.type.replace('_', ' ').title(),
+                'amount':      str(t.amount),
+                'note':        t.note or '',
+                'source':      'transaction',
+            })
+
+        for p in penalties:
+            rows.append({
+                'id':          str(p.id),
+                'date_ad':     p.created_at.date().isoformat(),
+                'nepali_date': p.nepali_date or '',
+                'member_name': p.member.full_name or p.member.email if p.member else '—',
+                'type':        'penalty',
+                'type_label':  'Penalty',
+                'amount':      str(p.amount),
+                'note':        p.reason or '',
+                'source':      'penalty',
+            })
+
+        # sort all rows by date_ad
+        rows.sort(key=lambda r: r['date_ad'])
+
+        # ── summary totals ─────────────────────────────────────────────────
+        deposit_total   = sum(
+            Decimal(r['amount']) for r in rows if r['type'] == 'deposit'
+        )
+        withdrawal_total = sum(
+            Decimal(r['amount']) for r in rows if r['type'] == 'withdrawal'
+        )
+        interest_total  = sum(
+            Decimal(r['amount']) for r in rows if r['type'] == 'interest_credit'
+        )
+        penalty_total   = sum(
+            Decimal(r['amount']) for r in rows if r['type'] == 'penalty'
+        )
+
+        return Response({
+            'rows': rows,
+            'summary': {
+                'total_deposits':    str(deposit_total),
+                'total_withdrawals': str(withdrawal_total),
+                'total_interest':    str(interest_total),
+                'total_penalty':     str(penalty_total),
+                'total_rows':        len(rows),
+            },
+            'filters': {
+                'fiscal_year': fiscal_year or '',
+                'bs_month':    bs_month or '',
+                'bs_year':     bs_year or '',
+                'member_id':   member_id or '',
+                'type':        txn_type or '',
+            }
+        })
 
 class AdminDepositView(APIView):
     permission_classes = [IsAdmin]
@@ -503,6 +636,174 @@ class AdminLoanScheduleView(APIView):
             })
 
         return Response(result)
+    
+class AdminLoansReportView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        from .models import Loan, LoanRepayment, Penalty
+        from .bs_calendar import get_bs_month_ad_range, get_fiscal_year_ad_range
+        from django.db.models import Sum
+
+        # ── filters ───────────────────────────────────────────────────────
+        loan_kind   = request.query_params.get('kind', 'member')  # 'member' | 'borrower'
+        person_id   = request.query_params.get('person')           # member or borrower id
+        fiscal_year = request.query_params.get('fiscal_year')
+        bs_month    = request.query_params.get('bs_month')
+        bs_year     = request.query_params.get('bs_year')
+        txn_type    = request.query_params.get('type')             # disbursement|repayment|penalty|all
+
+        # ── date range ────────────────────────────────────────────────────
+        start_ad = None
+        end_ad   = None
+
+        if fiscal_year and bs_month and bs_year:
+            start_ad, end_ad = get_bs_month_ad_range(
+                int(bs_year), int(bs_month)
+            )
+        elif fiscal_year:
+            start_ad, end_ad = get_fiscal_year_ad_range(fiscal_year)
+
+        # ── base loan queryset filtered by kind ──────────────────────────
+        if loan_kind == 'member':
+            loans = Loan.objects.filter(member__isnull=False)
+        else:
+            loans = Loan.objects.filter(borrower__isnull=False)
+
+        if person_id:
+            if loan_kind == 'member':
+                loans = loans.filter(member__id=person_id)
+            else:
+                loans = loans.filter(borrower__id=person_id)
+
+        loan_ids = loans.values_list('id', flat=True)
+
+        rows = []
+
+        # ── DISBURSEMENTS ─────────────────────────────────────────────────
+        if not txn_type or txn_type == 'disbursement':
+            from .models import AccountTransaction
+            disbursements = AccountTransaction.objects.filter(
+                reference_type='loan_disbursement',
+                reference_id__in=loan_ids,
+            ).select_related('account', 'created_by')
+
+            if start_ad and end_ad:
+                disbursements = disbursements.filter(
+                    created_at__date__gte=start_ad,
+                    created_at__date__lte=end_ad,
+                )
+
+            for d in disbursements:
+                # get loan for borrower name
+                try:
+                    loan = Loan.objects.get(id=d.reference_id)
+                    name = loan.borrower_name
+                except Loan.DoesNotExist:
+                    name = '—'
+
+                rows.append({
+                    'date_ad':          d.created_at.date().isoformat(),
+                    'nepali_date':      d.nepali_date or '',
+                    'name':             name,
+                    'type':             'disbursement',
+                    'type_label':       'Disbursement',
+                    'principal':        str(d.amount),
+                    'interest':         '0.00',
+                    'penalty':          '0.00',
+                })
+
+        # ── REPAYMENTS ────────────────────────────────────────────────────
+        if not txn_type or txn_type == 'repayment':
+            repayments = LoanRepayment.objects.filter(
+                loan_id__in=loan_ids,
+            ).select_related('loan', 'recorded_by')
+
+            if start_ad and end_ad:
+                repayments = repayments.filter(
+                    paid_at__gte=start_ad,
+                    paid_at__lte=end_ad,
+                )
+
+            for r in repayments:
+                rows.append({
+                    'date_ad':     r.paid_at.isoformat(),
+                    'nepali_date': r.nepali_date or '',
+                    'name':        r.loan.borrower_name,
+                    'type':        'repayment',
+                    'type_label':  'Repayment',
+                    'principal':   str(r.principal_portion),
+                    'interest':    str(r.interest_portion),
+                    'penalty':     str(r.penalty_portion),
+                })
+
+        # ── PENALTY COLLECTED (only penalty_portion from repayments) ─────
+        # Already included in repayment rows above as penalty column
+        # For 'penalty' filter only — show repayments that have penalty_portion > 0
+        if txn_type == 'penalty':
+            rows = []   # reset and rebuild with only penalty-containing repayments
+            repayments = LoanRepayment.objects.filter(
+                loan_id__in=loan_ids,
+                penalty_portion__gt=0,
+            ).select_related('loan')
+
+            if start_ad and end_ad:
+                repayments = repayments.filter(
+                    paid_at__gte=start_ad,
+                    paid_at__lte=end_ad,
+                )
+
+            for r in repayments:
+                rows.append({
+                    'date_ad':     r.paid_at.isoformat(),
+                    'nepali_date': r.nepali_date or '',
+                    'name':        r.loan.borrower_name,
+                    'type':        'penalty',
+                    'type_label':  'Penalty Collected',
+                    'principal':   '0.00',
+                    'interest':    '0.00',
+                    'penalty':     str(r.penalty_portion),
+                })
+
+        # ── sort all rows by date ─────────────────────────────────────────
+        rows.sort(key=lambda r: r['date_ad'])
+
+        # ── summary ───────────────────────────────────────────────────────
+        total_disbursed = sum(
+            Decimal(r['principal'])
+            for r in rows if r['type'] == 'disbursement'
+        )
+        total_principal_repaid = sum(
+            Decimal(r['principal'])
+            for r in rows if r['type'] == 'repayment'
+        )
+        total_interest = sum(
+            Decimal(r['interest'])
+            for r in rows if r['type'] == 'repayment'
+        )
+        total_penalty = sum(
+            Decimal(r['penalty'])
+            for r in rows
+        )
+
+        return Response({
+            'rows': rows,
+            'summary': {
+                'total_disbursed':        str(total_disbursed),
+                'total_principal_repaid': str(total_principal_repaid),
+                'total_interest':         str(total_interest),
+                'total_penalty':          str(total_penalty),
+                'total_rows':             len(rows),
+            },
+            'filters': {
+                'kind':        loan_kind,
+                'fiscal_year': fiscal_year or '',
+                'bs_month':    bs_month or '',
+                'bs_year':     bs_year or '',
+                'person_id':   person_id or '',
+                'type':        txn_type or '',
+            }
+        })
 
 #--------Expenditure-----
 
