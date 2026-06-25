@@ -1,6 +1,14 @@
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
+from .bs_calendar import (
+    get_bs_month_ad_range,
+    get_fiscal_year_ad_range,
+    get_bs_month_name,
+    today_bs,
+    get_fiscal_year,
+    get_nepali_date_from_ad,    # ← add this
+)
 
 
 def round2(value):
@@ -806,3 +814,457 @@ def get_unpaid_loan_penalties(loan):
     ).aggregate(total=Sum('amount_remaining'))['total']
 
     return round2(total) if total else Decimal('0.00')
+
+def _check_edit_allowed(nepali_date_str):
+    """Raise ValueError if transaction is outside current fiscal year."""
+    from .bs_calendar import is_nepali_date_in_current_fiscal_year
+    if not nepali_date_str:
+        raise ValueError(
+            'Transaction has no Nepali date recorded — cannot verify fiscal year. '
+            'Contact system administrator.'
+        )
+    if not is_nepali_date_in_current_fiscal_year(nepali_date_str):
+        raise ValueError(
+            'This transaction cannot be edited because it falls outside '
+            'the current fiscal year.'
+        )
+
+
+def edit_savings_transaction(txn_id, new_amount, new_note,
+                              new_nepali_date, new_account_id,
+                              edited_by, edit_reason=''):
+    """
+    Edit a savings deposit or withdrawal.
+    Full reversal approach:
+      1. Reverse original account transaction
+      2. Reverse original savings balance change
+      3. Create corrected savings transaction
+      4. Create corrected account transaction
+      5. Log the edit
+    """
+    from .models import (
+        SavingsTransaction, Account, TransactionEditLog
+    )
+    from decimal import Decimal
+
+    txn = SavingsTransaction.objects.select_related(
+        'account__member'
+    ).get(id=txn_id)
+
+    _check_edit_allowed(
+        txn.nepali_date if hasattr(txn, 'nepali_date') and txn.nepali_date
+        else get_nepali_date_from_ad(txn.created_at.date())
+    )
+
+    if txn.type not in ('deposit', 'withdrawal'):
+        raise ValueError('Only deposits and withdrawals can be edited.')
+
+    new_amount = round2(Decimal(str(new_amount)))
+    if new_amount <= Decimal('0'):
+        raise ValueError('Amount must be greater than zero.')
+
+    savings_account = txn.account
+
+    # check sufficient balance for withdrawal edit
+    if txn.type == 'withdrawal':
+        current_balance = savings_account.balance
+        balance_without_old = round2(current_balance + txn.amount)
+        if new_amount > balance_without_old:
+            raise ValueError(
+                f'Insufficient balance. Available after reversal: '
+                f'Rs. {balance_without_old}'
+            )
+
+    # get original account transaction
+    from .models import AccountTransaction
+    orig_acct_txn = AccountTransaction.objects.filter(
+        reference_id=txn.id
+    ).first()
+
+    # snapshot original values for audit log
+    original_data = {
+        'amount':       str(txn.amount),
+        'note':         txn.note,
+        'nepali_date':  str(txn.nepali_date) if hasattr(txn, 'nepali_date') else '',
+        'account_id':   str(orig_acct_txn.account.id) if orig_acct_txn else '',
+        'account_name': orig_acct_txn.account.name if orig_acct_txn else '',
+    }
+
+    # ── STEP 1: reverse savings account balance ───────────────────────────
+    if txn.type == 'deposit':
+        savings_account.balance = round2(savings_account.balance - txn.amount)
+    else:
+        savings_account.balance = round2(savings_account.balance + txn.amount)
+    savings_account.save()
+
+    # ── STEP 2: reverse original cash/bank account transaction ────────────
+    if orig_acct_txn:
+        orig_cash_account = orig_acct_txn.account
+        if orig_acct_txn.transaction_type == 'credit':
+            orig_cash_account.balance = round2(
+                orig_cash_account.balance - orig_acct_txn.amount
+            )
+        else:
+            orig_cash_account.balance = round2(
+                orig_cash_account.balance + orig_acct_txn.amount
+            )
+        orig_cash_account.save()
+        orig_acct_txn.delete()
+
+    # ── STEP 3: update savings transaction with new values ────────────────
+    txn.amount = new_amount
+    txn.note   = new_note
+    if hasattr(txn, 'nepali_date'):
+        txn.nepali_date = new_nepali_date
+    txn.save()
+
+    # ── STEP 4: apply corrected balance to savings account ────────────────
+    if txn.type == 'deposit':
+        savings_account.balance = round2(savings_account.balance + new_amount)
+    else:
+        savings_account.balance = round2(savings_account.balance - new_amount)
+    savings_account.save()
+
+    # ── STEP 5: create corrected account transaction ──────────────────────
+    new_account = Account.objects.get(id=new_account_id, is_active=True)
+
+    reference_type = (
+        'savings_deposit' if txn.type == 'deposit' else 'savings_withdrawal'
+    )
+    member_name = (
+        savings_account.member.full_name or savings_account.member.email
+    )
+
+    if txn.type == 'deposit':
+        credit_account(
+            account        = new_account,
+            amount         = new_amount,
+            reference_type = reference_type,
+            reference_id   = txn.id,
+            recorded_by    = edited_by,
+            note           = f'[EDITED] Savings deposit — {member_name}',
+            nepali_date    = new_nepali_date,
+        )
+    else:
+        debit_account(
+            account        = new_account,
+            amount         = new_amount,
+            reference_type = reference_type,
+            reference_id   = txn.id,
+            recorded_by    = edited_by,
+            note           = f'[EDITED] Savings withdrawal — {member_name}',
+            nepali_date    = new_nepali_date,
+        )
+
+    # ── STEP 6: log the edit ──────────────────────────────────────────────
+    corrected_data = {
+        'amount':       str(new_amount),
+        'note':         new_note,
+        'nepali_date':  new_nepali_date,
+        'account_id':   str(new_account.id),
+        'account_name': new_account.name,
+    }
+    TransactionEditLog.objects.create(
+        transaction_type = (
+            'savings_deposit' if txn.type == 'deposit'
+            else 'savings_withdrawal'
+        ),
+        reference_id   = txn.id,
+        original_data  = original_data,
+        corrected_data = corrected_data,
+        edited_by      = edited_by,
+        reason         = edit_reason,
+    )
+
+    return txn
+
+
+def edit_savings_penalty(penalty_id, new_amount, new_reason,
+                          new_nepali_date, new_account_id,
+                          edited_by, edit_reason=''):
+    """Edit a savings penalty — reverse old, apply new."""
+    from .models import Penalty, Account, AccountTransaction, TransactionEditLog
+    from decimal import Decimal
+
+    penalty = Penalty.objects.select_related(
+        'member', 'account'
+    ).get(id=penalty_id, penalty_type='savings')
+
+    _check_edit_allowed(penalty.nepali_date)
+
+    new_amount = round2(Decimal(str(new_amount)))
+    if new_amount <= Decimal('0'):
+        raise ValueError('Amount must be greater than zero.')
+
+    original_data = {
+        'amount':       str(penalty.amount),
+        'reason':       penalty.reason,
+        'nepali_date':  penalty.nepali_date,
+        'account_id':   str(penalty.account.id) if penalty.account else '',
+        'account_name': penalty.account.name if penalty.account else '',
+    }
+
+    # ── reverse original account credit ──────────────────────────────────
+    orig_acct_txn = AccountTransaction.objects.filter(
+        reference_id=penalty.id
+    ).first()
+    if orig_acct_txn:
+        orig_cash_account = orig_acct_txn.account
+        orig_cash_account.balance = round2(
+            orig_cash_account.balance - orig_acct_txn.amount
+        )
+        orig_cash_account.save()
+        orig_acct_txn.delete()
+
+    # ── update penalty ────────────────────────────────────────────────────
+    penalty.amount      = new_amount
+    penalty.reason      = new_reason
+    penalty.nepali_date = new_nepali_date
+    penalty.save()
+
+    # ── apply corrected credit to new account ─────────────────────────────
+    new_account = Account.objects.get(id=new_account_id, is_active=True)
+    member_name = penalty.member.full_name or penalty.member.email
+
+    credit_account(
+        account        = new_account,
+        amount         = new_amount,
+        reference_type = 'penalty_income',
+        reference_id   = penalty.id,
+        recorded_by    = edited_by,
+        note           = f'[EDITED] Savings penalty — {member_name}',
+        nepali_date    = new_nepali_date,
+    )
+    penalty.account = new_account
+    penalty.save()
+
+    # ── log ───────────────────────────────────────────────────────────────
+    TransactionEditLog.objects.create(
+        transaction_type = 'savings_penalty',
+        reference_id     = penalty.id,
+        original_data    = original_data,
+        corrected_data   = {
+            'amount':       str(new_amount),
+            'reason':       new_reason,
+            'nepali_date':  new_nepali_date,
+            'account_id':   str(new_account.id),
+            'account_name': new_account.name,
+        },
+        edited_by = edited_by,
+        reason    = edit_reason,
+    )
+
+    return penalty
+
+
+def edit_income(income_id, new_amount, new_category_id,
+                new_description, new_nepali_date, new_account_id,
+                edited_by, edit_reason=''):
+    """Edit an income record — reverse old, apply new."""
+    from .models import Income, IncomeCategory, Account, AccountTransaction
+    from .models import TransactionEditLog
+    from decimal import Decimal
+
+    income = Income.objects.select_related('category').get(id=income_id)
+
+    _check_edit_allowed(
+        income.nepali_date if hasattr(income, 'nepali_date') and income.nepali_date
+        else get_nepali_date_from_ad(income.income_date)
+    )
+
+    new_amount = round2(Decimal(str(new_amount)))
+    if new_amount <= Decimal('0'):
+        raise ValueError('Amount must be greater than zero.')
+
+    original_data = {
+        'amount':      str(income.amount),
+        'category':    income.category.name,
+        'description': income.description,
+        'income_date': str(income.income_date),
+    }
+
+    # ── reverse original account credit ──────────────────────────────────
+    orig_acct_txn = AccountTransaction.objects.filter(
+        reference_id=income.id
+    ).first()
+    if orig_acct_txn:
+        orig_cash_account = orig_acct_txn.account
+        orig_cash_account.balance = round2(
+            orig_cash_account.balance - orig_acct_txn.amount
+        )
+        orig_cash_account.save()
+        orig_acct_txn.delete()
+
+    # ── update income record ──────────────────────────────────────────────
+    new_category  = IncomeCategory.objects.get(id=new_category_id)
+    new_account   = Account.objects.get(id=new_account_id, is_active=True)
+    from .bs_calendar import bs_to_ad
+    parts         = new_nepali_date.split('-')
+    new_income_date = bs_to_ad(int(parts[0]), int(parts[1]), int(parts[2]))
+
+    income.amount      = new_amount
+    income.category    = new_category
+    income.description = new_description
+    income.income_date = new_income_date
+    if hasattr(income, 'nepali_date'):
+        income.nepali_date = new_nepali_date
+    income.save()
+
+    # ── apply corrected credit ────────────────────────────────────────────
+    credit_account(
+        account        = new_account,
+        amount         = new_amount,
+        reference_type = 'income',
+        reference_id   = income.id,
+        recorded_by    = edited_by,
+        note           = f'[EDITED] {new_description}',
+        nepali_date    = new_nepali_date,
+    )
+
+    # ── log ───────────────────────────────────────────────────────────────
+    TransactionEditLog.objects.create(
+        transaction_type = 'income',
+        reference_id     = income.id,
+        original_data    = original_data,
+        corrected_data   = {
+            'amount':      str(new_amount),
+            'category':    new_category.name,
+            'description': new_description,
+            'nepali_date': new_nepali_date,
+            'account_id':  str(new_account.id),
+        },
+        edited_by = edited_by,
+        reason    = edit_reason,
+    )
+
+    return income
+
+
+def edit_expenditure(exp_id, new_amount, new_category_id,
+                     new_description, new_nepali_date, new_account_id,
+                     edited_by, edit_reason=''):
+    """Edit an expenditure record — reverse old, apply new."""
+    from .models import Expenditure, ExpenditureCategory, Account
+    from .models import AccountTransaction, TransactionEditLog
+    from decimal import Decimal
+
+    exp = Expenditure.objects.select_related('category').get(id=exp_id)
+
+    _check_edit_allowed(
+        exp.nepali_date if hasattr(exp, 'nepali_date') and exp.nepali_date
+        else get_nepali_date_from_ad(exp.expense_date)
+    )
+
+    new_amount = round2(Decimal(str(new_amount)))
+    if new_amount <= Decimal('0'):
+        raise ValueError('Amount must be greater than zero.')
+
+    original_data = {
+        'amount':      str(exp.amount),
+        'category':    exp.category.name,
+        'description': exp.description,
+        'expense_date': str(exp.expense_date),
+    }
+
+    # ── reverse original account debit ────────────────────────────────────
+    orig_acct_txn = AccountTransaction.objects.filter(
+        reference_id=exp.id
+    ).first()
+    if orig_acct_txn:
+        orig_cash_account = orig_acct_txn.account
+        orig_cash_account.balance = round2(
+            orig_cash_account.balance + orig_acct_txn.amount
+        )
+        orig_cash_account.save()
+        orig_acct_txn.delete()
+
+    # ── update expenditure record ─────────────────────────────────────────
+    new_category = ExpenditureCategory.objects.get(id=new_category_id)
+    new_account  = Account.objects.get(id=new_account_id, is_active=True)
+    from .bs_calendar import bs_to_ad
+    parts         = new_nepali_date.split('-')
+    new_exp_date  = bs_to_ad(int(parts[0]), int(parts[1]), int(parts[2]))
+
+    exp.amount      = new_amount
+    exp.category    = new_category
+    exp.description = new_description
+    exp.expense_date = new_exp_date
+    if hasattr(exp, 'nepali_date'):
+        exp.nepali_date = new_nepali_date
+    exp.save()
+
+    # ── check sufficient balance for new debit ────────────────────────────
+    if new_account.balance < new_amount:
+        raise ValueError(
+            f'Insufficient balance in {new_account.name}. '
+            f'Available: Rs. {new_account.balance}'
+        )
+
+    # ── apply corrected debit ─────────────────────────────────────────────
+    debit_account(
+        account        = new_account,
+        amount         = new_amount,
+        reference_type = 'expenditure',
+        reference_id   = exp.id,
+        recorded_by    = edited_by,
+        note           = f'[EDITED] {new_description}',
+        nepali_date    = new_nepali_date,
+    )
+
+    # ── log ───────────────────────────────────────────────────────────────
+    TransactionEditLog.objects.create(
+        transaction_type = 'expenditure',
+        reference_id     = exp.id,
+        original_data    = original_data,
+        corrected_data   = {
+            'amount':      str(new_amount),
+            'category':    new_category.name,
+            'description': new_description,
+            'nepali_date': new_nepali_date,
+            'account_id':  str(new_account.id),
+        },
+        edited_by = edited_by,
+        reason    = edit_reason,
+    )
+
+    return exp
+
+
+def reverse_interest_application(bs_year, bs_month, reversed_by):
+    """
+    Reverse an entire month's interest application for all members.
+    Removes all interest_credit transactions for that BS month
+    and restores savings account balances.
+    """
+    from .models import SavingsTransaction, SavingsAccount
+    from .bs_calendar import get_bs_month_ad_range
+    from django.db.models import Q
+
+    start_ad, end_ad = get_bs_month_ad_range(bs_year, bs_month)
+
+    interest_txns = SavingsTransaction.objects.filter(
+        type='interest_credit',
+        created_at__date__gte=start_ad,
+        created_at__date__lte=end_ad,
+    ).select_related('account')
+
+    if not interest_txns.exists():
+        raise ValueError(
+            f'No interest transactions found for '
+            f'{get_bs_month_name(bs_month)} {bs_year}.'
+        )
+
+    reversed_count = 0
+    for txn in interest_txns:
+        # reverse savings balance
+        txn.account.balance = round2(txn.account.balance - txn.amount)
+        txn.account.save()
+        txn.delete()
+        reversed_count += 1
+
+    # also reset last_interest_date on accounts so interest can be re-applied
+    SavingsAccount.objects.filter(
+        is_active=True
+    ).update(last_interest_date=None)
+
+    return reversed_count

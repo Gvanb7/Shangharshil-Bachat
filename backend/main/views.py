@@ -21,14 +21,16 @@ from .serializers import (
     RepaymentInputSerializer, ExpenditureSerializer,
     ExpenditureCategorySerializer, IncomeSerializer, IncomeCategorySerializer, 
     AccountSerializer, AccountTransactionSerializer, 
-    TrialBalanceSerializer, CooperativeSettingsSerializer, PenaltySerializer, BorrowerSerializer
+    TrialBalanceSerializer, CooperativeSettingsSerializer, PenaltySerializer, BorrowerSerializer,
+    
 )
 
 from .services import (
     deposit_to_savings, withdraw_from_savings, apply_interest_to_account, disburse_loan, record_loan_repayment,
     generate_loan_schedule, credit_account, debit_account, transfer_between_accounts, 
     get_statement_data, create_trial_balance_record, create_annual_trial_balance_record,
-    apply_savings_penalty, apply_loan_penalty 
+    apply_savings_penalty, apply_loan_penalty, edit_savings_transaction, edit_savings_penalty, edit_income, edit_expenditure, 
+    reverse_interest_application,
 )
 
 from .bs_calendar import (
@@ -1595,3 +1597,170 @@ class AdminCreateBorrowerLoanView(APIView):
         )
 
         return Response(LoanSerializer(loan).data, status=201)
+    
+class AdminEditSavingsTransactionView(APIView):
+    permission_classes = [IsAdmin]
+
+    @transaction.atomic
+    def patch(self, request, txn_id):
+        amount      = request.data.get('amount')
+        note        = request.data.get('note', '')
+        nepali_date = request.data.get('nepali_date', '')
+        account_id  = request.data.get('account_id')
+        reason      = request.data.get('reason', '')
+
+        if not amount:
+            return Response({'error': 'Amount is required.'}, status=400)
+        if not nepali_date:
+            return Response({'error': 'Date is required.'}, status=400)
+        if not account_id:
+            return Response({'error': 'Account is required.'}, status=400)
+
+        try:
+            txn = edit_savings_transaction(
+                txn_id         = txn_id,
+                new_amount     = amount,
+                new_note       = note,
+                new_nepali_date = nepali_date,
+                new_account_id  = account_id,
+                edited_by      = request.user,
+                edit_reason    = reason,
+            )
+            return Response(SavingsTransactionSerializer(txn).data)
+        except (ValueError, Exception) as e:
+            return Response({'error': str(e)}, status=400)
+
+
+class AdminEditSavingsPenaltyView(APIView):
+    permission_classes = [IsAdmin]
+
+    @transaction.atomic
+    def patch(self, request, penalty_id):
+        amount      = request.data.get('amount')
+        reason      = request.data.get('reason', '')
+        nepali_date = request.data.get('nepali_date', '')
+        account_id  = request.data.get('account_id')
+        edit_reason = request.data.get('edit_reason', '')
+
+        if not amount:
+            return Response({'error': 'Amount is required.'}, status=400)
+        if not nepali_date:
+            return Response({'error': 'Date is required.'}, status=400)
+        if not account_id:
+            return Response({'error': 'Account is required.'}, status=400)
+
+        try:
+            penalty = edit_savings_penalty(
+                penalty_id     = penalty_id,
+                new_amount     = amount,
+                new_reason     = reason,
+                new_nepali_date = nepali_date,
+                new_account_id  = account_id,
+                edited_by      = request.user,
+                edit_reason    = edit_reason,
+            )
+            return Response(PenaltySerializer(penalty).data)
+        except (ValueError, Exception) as e:
+            return Response({'error': str(e)}, status=400)
+
+
+class AdminEditIncomeView(APIView):
+    permission_classes = [IsAdmin]
+
+    @transaction.atomic
+    def patch(self, request, income_id):
+        amount      = request.data.get('amount')
+        category_id = request.data.get('category')
+        description = request.data.get('description', '')
+        nepali_date = request.data.get('nepali_date', '')
+        account_id  = request.data.get('account_id')
+        reason      = request.data.get('reason', '')
+
+        if not amount:
+            return Response({'error': 'Amount is required.'}, status=400)
+        if not category_id:
+            return Response({'error': 'Category is required.'}, status=400)
+        if not nepali_date:
+            return Response({'error': 'Date is required.'}, status=400)
+        if not account_id:
+            return Response({'error': 'Account is required.'}, status=400)
+
+        try:
+            income = edit_income(
+                income_id       = income_id,
+                new_amount      = amount,
+                new_category_id = category_id,
+                new_description = description,
+                new_nepali_date = nepali_date,
+                new_account_id  = account_id,
+                edited_by       = request.user,
+                edit_reason     = reason,
+            )
+            return Response(IncomeSerializer(income).data)
+        except (ValueError, Exception) as e:
+            return Response({'error': str(e)}, status=400)
+
+
+class AdminEditExpenditureView(APIView):
+    permission_classes = [IsAdmin]
+
+    @transaction.atomic
+    def patch(self, request, exp_id):
+        amount      = request.data.get('amount')
+        category_id = request.data.get('category')
+        description = request.data.get('description', '')
+        nepali_date = request.data.get('nepali_date', '')
+        account_id  = request.data.get('account_id')
+        reason      = request.data.get('reason', '')
+
+        if not amount:
+            return Response({'error': 'Amount is required.'}, status=400)
+        if not category_id:
+            return Response({'error': 'Category is required.'}, status=400)
+        if not nepali_date:
+            return Response({'error': 'Date is required.'}, status=400)
+        if not account_id:
+            return Response({'error': 'Account is required.'}, status=400)
+
+        try:
+            exp = edit_expenditure(
+                exp_id          = exp_id,
+                new_amount      = amount,
+                new_category_id = category_id,
+                new_description = description,
+                new_nepali_date = nepali_date,
+                new_account_id  = account_id,
+                edited_by       = request.user,
+                edit_reason     = reason,
+            )
+            return Response(ExpenditureSerializer(exp).data)
+        except (ValueError, Exception) as e:
+            return Response({'error': str(e)}, status=400)
+
+
+class AdminReverseInterestView(APIView):
+    permission_classes = [IsAdmin]
+
+    @transaction.atomic
+    def post(self, request):
+        bs_year  = request.data.get('bs_year')
+        bs_month = request.data.get('bs_month')
+
+        if not bs_year or not bs_month:
+            return Response(
+                {'error': 'bs_year and bs_month are required.'},
+                status=400
+            )
+
+        try:
+            count = reverse_interest_application(
+                bs_year      = int(bs_year),
+                bs_month     = int(bs_month),
+                reversed_by  = request.user,
+            )
+            return Response({
+                'message': f'Interest reversed for {count} accounts. '
+                           f'You can now re-apply interest with the correct rate.'
+            })
+        except ValueError as e:
+            return Response({'error': str(e)}, status=400)

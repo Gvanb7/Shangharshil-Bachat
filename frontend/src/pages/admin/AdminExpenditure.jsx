@@ -5,6 +5,7 @@ import { toBS } from '../../lib/nepaliDate'
 import BSDatePicker from '../../components/BSDatePicker'
 import FiscalYearDatePicker from '../../components/FiscalYearDatePicker'
 import useAccounts from '../../hooks/useAccounts'
+import EditTransactionModal from '../../components/EditTransactionModels'
 
 const EMPTY_FORM = {
   category: '', amount: '', description: '', expense_date: '', account_id: '',
@@ -20,10 +21,10 @@ export default function AdminExpenditure() {
   const { accounts } = useAccounts()
 
   const [showForm,         setShowForm]         = useState(false)
-  const [editItem,         setEditItem]         = useState(null)
   const [form,             setForm]             = useState(EMPTY_FORM)
   const [formErr,          setFormErr]          = useState('')
   const [formLoad,         setFormLoad]         = useState(false)
+  const [editTxnItem, setEditTxnItem] = useState(null)
 
   const [search,           setSearch]           = useState('')
   const [catFilter,        setCatFilter]        = useState('all')
@@ -63,7 +64,6 @@ export default function AdminExpenditure() {
   }
 
   async function openAdd() {
-    setEditItem(null)
     let currentFY = ''
     try {
       const res = await api.get('/fiscal-years/current/')
@@ -78,29 +78,9 @@ export default function AdminExpenditure() {
     setShowForm(true)
   }
 
-  async function openEdit(item) {
-    setEditItem(item)
-    let currentFY = ''
-    try {
-      const res = await api.get('/fiscal-years/current/')
-      currentFY = res.data.fiscal_year
-    } catch {}
-    setForm({
-      category:     item.category,
-      amount:       item.amount,
-      description:  item.description,
-      expense_date: item.expense_date,
-      account_id:   item.account_id || '',
-      nepali_date:  item.nepali_date || '',
-      fiscal_year:  item.fiscal_year || currentFY,
-    })
-    setFormErr('')
-    setShowForm(true)
-  }
 
   function closeForm() {
     setShowForm(false)
-    setEditItem(null)
     setForm(EMPTY_FORM)
     setFormErr('')
   }
@@ -126,13 +106,8 @@ export default function AdminExpenditure() {
     }
     setFormLoad(true)
     try {
-      if (editItem) {
-        await api.patch(`/expenditures/${editItem.id}/`, form)
-        flash('Expenditure updated.')
-      } else {
-        await api.post('/expenditures/', form)
-        flash('Expenditure recorded.')
-      }
+      await api.post('/expenditures/', form)
+      flash('Expenditure recorded successfully.')
       closeForm()
       fetchAll()
     } catch (err) {
@@ -418,7 +393,7 @@ export default function AdminExpenditure() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => openEdit(item)}
+                          onClick={() => setEditTxnItem(item)}
                           className="text-xs text-primary-600
                                      hover:text-primary-800 font-medium">
                           Edit
@@ -449,7 +424,7 @@ export default function AdminExpenditure() {
                 <div className="px-6 py-4 border-b border-gray-200 flex
                                 items-center justify-between">
               <h3 className="font-semibold text-gray-800">
-                {editItem ? 'Edit expenditure' : 'Record expenditure'}
+                Record Expenditure
               </h3>
               <button
                 onClick={closeForm}
@@ -555,9 +530,7 @@ export default function AdminExpenditure() {
                   type="submit"
                   disabled={formLoad}
                   className="btn-primary flex-1">
-                  {formLoad
-                    ? 'Saving...'
-                    : editItem ? 'Save changes' : 'Record'}
+                  {formLoad ? 'Saving...' : 'Record'}
                 </button>
               </div>
             </form>
@@ -784,6 +757,18 @@ export default function AdminExpenditure() {
         </div>
       )}
 
+      {editTxnItem && (
+        <EditTransactionModal
+          type="expenditure"
+          transaction={editTxnItem}
+          accounts={accounts}
+          onClose={() => setEditTxnItem(null)}
+          onSuccess={() => {
+            setEditTxnItem(null)
+            fetchAll()
+          }}
+        />
+      )}
     </AdminLayout>
   )
 }

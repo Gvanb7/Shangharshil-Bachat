@@ -534,3 +534,35 @@ class Borrower(models.Model):
 
     def __str__(self):
         return f'{self.full_name} ({self.phone})'
+
+class TransactionEditLog(models.Model):
+    TRANSACTION_TYPES = [
+        ('savings_deposit',    'Savings Deposit'),
+        ('savings_withdrawal', 'Savings Withdrawal'),
+        ('savings_penalty',    'Savings Penalty'),
+        ('income',             'Income'),
+        ('expenditure',        'Expenditure'),
+    ]
+
+    id               = models.UUIDField(
+                           primary_key=True,
+                           default=uuid.uuid4,
+                           editable=False
+                       )
+    transaction_type = models.CharField(max_length=30, choices=TRANSACTION_TYPES)
+    reference_id     = models.UUIDField()   # id of the original transaction
+    original_data    = models.JSONField()   # snapshot of original values
+    corrected_data   = models.JSONField()   # snapshot of corrected values
+    edited_by        = models.ForeignKey(
+                           settings.AUTH_USER_MODEL,
+                           on_delete=models.PROTECT,
+                           related_name='transaction_edits'
+                       )
+    edited_at        = models.DateTimeField(auto_now_add=True)
+    reason           = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-edited_at']
+
+    def __str__(self):
+        return f'Edit {self.transaction_type} {self.reference_id} by {self.edited_by.email}'

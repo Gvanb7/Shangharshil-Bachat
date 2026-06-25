@@ -90,4 +90,13 @@ urlpatterns = [
      path('borrowers/', views.AdminBorrowerListCreateView.as_view()),
      path('borrowers/<uuid:borrower_id>/',  views.AdminBorrowerDetailView.as_view()),
      path('loans/borrower/create/', views.AdminCreateBorrowerLoanView.as_view()),
+     
+     # Edit transactions
+     path('savings/transactions/<uuid:txn_id>/edit/', views.AdminEditSavingsTransactionView.as_view()),
+     path('savings/penalties/<uuid:penalty_id>/edit/', views.AdminEditSavingsPenaltyView.as_view()),
+     path('income/<uuid:income_id>/edit/', views.AdminEditIncomeView.as_view()),
+     path('expenditures/<uuid:exp_id>/edit/', views.AdminEditExpenditureView.as_view()),
+
+     # Reverse interest
+     path('savings/reverse-interest/', views.AdminReverseInterestView.as_view()),
 ]

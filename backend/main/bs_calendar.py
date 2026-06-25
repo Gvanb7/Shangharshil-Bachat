@@ -196,3 +196,25 @@ def is_date_in_fiscal_year(nepali_date_str, fy_string):
         return year == fy_start
     else:  # Baisakh to Ashadh
         return year == fy_start + 1
+    
+def is_nepali_date_in_current_fiscal_year(nepali_date_str):
+    """
+    Check if a BS date string (YYYY-MM-DD) falls within the
+    current fiscal year. Used for edit permission checks.
+    """
+    try:
+        parts  = nepali_date_str.strip().split('-')
+        year   = int(parts[0])
+        month  = int(parts[1])
+        current_y, current_m, _ = today_bs()
+        current_fy = get_fiscal_year(current_y, current_m)
+        txn_fy     = get_fiscal_year(year, month)
+        return txn_fy == current_fy
+    except (ValueError, IndexError):
+        return False
+
+
+def get_nepali_date_from_ad(ad_date):
+    """Convert an AD date object to BS string YYYY-MM-DD."""
+    y, m, d = ad_to_bs(ad_date)
+    return f'{y}-{str(m).zfill(2)}-{str(d).zfill(2)}'

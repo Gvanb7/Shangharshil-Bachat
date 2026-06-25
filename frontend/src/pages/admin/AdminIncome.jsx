@@ -5,6 +5,7 @@ import { toBS } from '../../lib/nepaliDate'
 import BSDatePicker from '../../components/BSDatePicker'
 import FiscalYearDatePicker from '../../components/FiscalYearDatePicker'
 import useAccounts from '../../hooks/useAccounts'
+import EditTransactionModal from '../../components/EditTransactionModels'
 
 const EMPTY_FORM = {
   category: '', amount: '', description: '', income_date: '',
@@ -20,11 +21,10 @@ export default function AdminIncome() {
   const { accounts } = useAccounts()
 
   const [showForm,         setShowForm]         = useState(false)
-  const [editItem,         setEditItem]         = useState(null)
   const [form,             setForm]             = useState(EMPTY_FORM)
   const [formErr,          setFormErr]          = useState('')
   const [formLoad,         setFormLoad]         = useState(false)
-
+  const [editTxnItem, setEditTxnItem] = useState(null)
   const [search,           setSearch]           = useState('')
   const [catFilter,        setCatFilter]        = useState('all')
   const [showConfirm,      setShowConfirm]      = useState(null)
@@ -62,7 +62,6 @@ export default function AdminIncome() {
   }
 
   async function openAdd() {
-    setEditItem(null)
     let currentFY = ''
     try {
       const res = await api.get('/fiscal-years/current/')
@@ -77,29 +76,8 @@ export default function AdminIncome() {
     setShowForm(true)
   }
 
-  async function openEdit(item) {
-    setEditItem(item)
-    let currentFY = ''
-    try {
-      const res = await api.get('/fiscal-years/current/')
-      currentFY = res.data.fiscal_year
-    } catch {}
-    setForm({
-      category:    item.category,
-      amount:      item.amount,
-      description: item.description,
-      fiscal_year: currentFY,
-      income_date: item.income_date,
-      account_id:  item.account_id,
-      nepali_date: item.nepali_date,
-    })
-    setFormErr('')
-    setShowForm(true)
-  }
-
   function closeForm() {
     setShowForm(false)
-    setEditItem(null)
     setForm(EMPTY_FORM)
     setFormErr('')
   }
@@ -120,22 +98,18 @@ export default function AdminIncome() {
       return
     }
     if (!form.nepali_date){
-      setForm.nepali_date = toBS(form.income_date)
+      setForm({ ...form, nepali_date: toBS(form.income_date) })
       return
     }
 
     setFormLoad(true)
     try {
-      if (editItem) {
-        await api.patch(`/income/${editItem.id}/`, form)
-        flash('Income updated.')
-      } else {
-        await api.post('/income/', form)
-        flash('Income recorded.')
-      }
+      await api.post('/income/', form)
+      flash('Income recorded.')
       closeForm()
       fetchAll()
-    } catch (err) {
+    }
+    catch (err) {
       const data = err.response?.data
       if (typeof data === 'object') {
         const first = Object.values(data)[0]
@@ -272,7 +246,13 @@ export default function AdminIncome() {
               className="btn-secondary text-sm">
               Manage categories
             </button>
-            <button onClick={openAdd} className="btn-primary text-sm">
+            <button
+              onClick={() => {
+                setForm(EMPTY_FORM)
+                setFormErr('')
+                setShowForm(true)
+              }}
+              className="btn-primary text-sm">
               + Record income
             </button>
           </div>
@@ -412,16 +392,14 @@ export default function AdminIncome() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => openEdit(item)}
-                          className="text-xs text-primary-600
-                                     hover:text-primary-800 font-medium">
+                          onClick={() => setEditTxnItem(item)}
+                          className="text-xs text-primary-600 hover:text-primary-800 font-medium">
                           Edit
                         </button>
                         <span className="text-gray-300">|</span>
                         <button
                           onClick={() => setShowConfirm(item)}
-                          className="text-xs text-red-500
-                                     hover:text-red-700 font-medium">
+                          className="text-xs text-red-500 hover:text-red-700 font-medium">
                           Delete
                         </button>
                       </div>
@@ -438,138 +416,135 @@ export default function AdminIncome() {
       {/* Add / Edit income modal */}
       {showForm && (
         <div className="fixed inset-0 z-50 bg-black/40 overflow-y-auto">
-    <div className="min-h-screen flex justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-8">
-        <div className="px-6 py-4 border-b border-gray-200 flex
-                        items-center justify-between">
-              <h3 className="font-semibold text-gray-800">
-                {editItem ? 'Edit income' : 'Record income'}
-              </h3>
-              <button
-                onClick={closeForm}
-                className="text-gray-400 hover:text-gray-600 text-xl">
-                ✕
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-              {formErr && (
-                <div className="px-3 py-2 bg-red-50 border border-red-200
-                                text-red-700 rounded-lg text-sm">
-                  {formErr}
+          <div className="min-h-screen flex justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md my-8">
+              <div className="px-6 py-4 border-b border-gray-200 flex
+                              items-center justify-between">
+                    <h3 className="font-semibold text-gray-800">
+                      Record Income
+                    </h3>
+                    <button
+                      onClick={closeForm}
+                      className="text-gray-400 hover:text-gray-600 text-xl">
+                      ✕
+                    </button>
+                  </div>
+                  <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+                    {formErr && (
+                      <div className="px-3 py-2 bg-red-50 border border-red-200
+                                      text-red-700 rounded-lg text-sm">
+                        {formErr}
+                      </div>
+                    )}
+
+                    <FiscalYearDatePicker
+                      fiscalYear={form.fiscal_year}
+                      onFiscalYearChange={(fy) => setForm({ ...form, fiscal_year: fy })}
+                      dateValue={form.nepali_date}
+                      onDateChange={(val) => setForm({ ...form, nepali_date: val })}
+                      required
+                    />
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Category <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        className="input-field"
+                        value={form.category}
+                        onChange={(e) => setForm({ ...form, category: e.target.value })}
+                        required>
+                        <option value="">Select category...</option>
+                        {categories.map(c => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => { closeForm(); setShowCatPanel(true) }}
+                        className="text-xs text-primary-600 hover:text-primary-700
+                                  mt-1 underline">
+                        + Add new category
+                      </button>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Amount (Rs.) <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        className="input-field"
+                        placeholder="0.00"
+                        value={form.amount}
+                        onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Received in account <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        className="input-field"
+                        value={form.account_id}
+                        onChange={(e) => setForm({ ...form, account_id: e.target.value })}
+                        required>
+                        <option value="">Select account...</option>
+                        {accounts.map(a => (
+                          <option key={a.id} value={a.id}>
+                            {a.name} ({a.account_type_display})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Description <span className="text-red-500">*</span>
+                      </label>
+                      <textarea
+                        className="input-field resize-none"
+                        rows={2}
+                        placeholder="Describe the income..."
+                        value={form.description}
+                        onChange={(e) => setForm({ ...form, description: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    <div className="hidden">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Date <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        className="input-field"
+                        value={form.income_date}
+                        onChange={(e) => setForm({ ...form, income_date: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    <div className="flex gap-3 pt-2">
+                      <button
+                        type="button"
+                        onClick={closeForm}
+                        className="btn-secondary flex-1">
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={formLoad}
+                        className="btn-primary flex-1">
+                        {formLoad ? 'Saving...' : 'Record'}
+                      </button>
+                    </div>
+                  </form>
                 </div>
-              )}
-
-              <FiscalYearDatePicker
-                fiscalYear={form.fiscal_year}
-                onFiscalYearChange={(fy) => setForm({ ...form, fiscal_year: fy })}
-                dateValue={form.nepali_date}
-                onDateChange={(val) => setForm({ ...form, nepali_date: val })}
-                required
-              />
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Category <span className="text-red-500">*</span>
-                </label>
-                <select
-                  className="input-field"
-                  value={form.category}
-                  onChange={(e) => setForm({ ...form, category: e.target.value })}
-                  required>
-                  <option value="">Select category...</option>
-                  {categories.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => { closeForm(); setShowCatPanel(true) }}
-                  className="text-xs text-primary-600 hover:text-primary-700
-                            mt-1 underline">
-                  + Add new category
-                </button>
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Amount (Rs.) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  className="input-field"
-                  placeholder="0.00"
-                  value={form.amount}
-                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Received in account <span className="text-red-500">*</span>
-                </label>
-                <select
-                  className="input-field"
-                  value={form.account_id}
-                  onChange={(e) => setForm({ ...form, account_id: e.target.value })}
-                  required>
-                  <option value="">Select account...</option>
-                  {accounts.map(a => (
-                    <option key={a.id} value={a.id}>
-                      {a.name} ({a.account_type_display})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Description <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  className="input-field resize-none"
-                  rows={2}
-                  placeholder="Describe the income..."
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  required
-                />
-              </div>
-
-              <div className="hidden">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Date <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="date"
-                  className="input-field"
-                  value={form.income_date}
-                  onChange={(e) => setForm({ ...form, income_date: e.target.value })}
-                  required
-                />
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={closeForm}
-                  className="btn-secondary flex-1">
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={formLoad}
-                  className="btn-primary flex-1">
-                  {formLoad
-                    ? 'Saving...'
-                    : editItem ? 'Save changes' : 'Record'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
         </div>
       )}
 
@@ -788,6 +763,18 @@ export default function AdminIncome() {
         </div>
       )}
 
+      {editTxnItem && (
+        <EditTransactionModal
+          type="income"
+          transaction={editTxnItem}
+          accounts={accounts}
+          onClose={() => setEditTxnItem(null)}
+          onSuccess={() => {
+            setEditTxnItem(null)
+            fetchAll()
+          }}
+        />
+      )}
     </AdminLayout>
   )
 }

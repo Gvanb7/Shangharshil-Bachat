@@ -5,6 +5,7 @@ import { toBS } from '../../lib/nepaliDate'
 import BSDatePicker from '../../components/BSDatePicker'
 import useAccounts from '../../hooks/useAccounts'
 import FiscalYearDatePicker from '../../components/FiscalYearDatePicker'
+import EditTransactionModal from '../../components/EditTransactionModels'
 
 const EMPTY_ACCOUNT_FORM = { member_id: '', interest_rate: '6.00' }
 const EMPTY_TXN_FORM = { fiscal_year: '',amount: '', note: '', account_id: '', nepali_date: '' }
@@ -39,6 +40,17 @@ export default function AdminSavings() {
 
   const [search,       setSearch]       = useState('')
   const [interestLoad, setInterestLoad] = useState(false)
+
+  const [editTxn,     setEditTxn]     = useState(null)  // {transaction, type}
+
+  const [showReverseInterest,  setShowReverseInterest]  = useState(false)
+  const [reverseForm,          setReverseForm]           = useState({
+    fiscal_year: '', bs_year: '', bs_month: ''
+  })
+  const [reverseLoad,  setReverseLoad]  = useState(false)
+  const [reverseErr,   setReverseErr]   = useState('')
+  const [reverseMsg,   setReverseMsg]   = useState('')
+  const [revMonthOpts, setRevMonthOpts] = useState([])
 
   // cash/bank accounts from useAccounts hook
   const { accounts: cashAccounts } = useAccounts()
@@ -363,6 +375,31 @@ export default function AdminSavings() {
     }
   }
 
+  async function handleReverseInterest(e) {
+    e.preventDefault()
+    setReverseErr('')
+    if (!reverseForm.bs_year || !reverseForm.bs_month) {
+      setReverseErr('Please select a fiscal year and month.')
+      return
+    }
+    setReverseLoad(true)
+    try {
+      const res = await api.post('/savings/reverse-interest/', {
+        bs_year:  reverseForm.bs_year,
+        bs_month: reverseForm.bs_month,
+      })
+      setReverseMsg(res.data.message)
+      setShowReverseInterest(false)
+      fetchAll()
+      if (selected) fetchTxns(selected.id)
+      flash(res.data.message)
+    } catch (err) {
+      setReverseErr(err.response?.data?.error || 'Failed to reverse interest.')
+    } finally {
+      setReverseLoad(false)
+    }
+  }
+
   function fmt(amount) {
     return `Rs. ${parseFloat(amount || 0).toLocaleString('en-NP', {
       minimumFractionDigits: 2,
@@ -408,6 +445,18 @@ export default function AdminSavings() {
               disabled={interestLoad}
               className="btn-secondary text-sm">
               {interestLoad ? 'Applying...' : '+ Apply monthly interest'}
+            </button>
+
+            <button
+              onClick={() => {
+                setReverseErr('')
+                setReverseMsg('')
+                setReverseForm({ fiscal_year: '', bs_year: '', bs_month: '' })
+                setRevMonthOpts([])
+                setShowReverseInterest(true)
+              }}
+              className="btn-secondary text-sm">
+              ↺ Reverse interest
             </button>
             <button
               onClick={() => { setShowCreate(true); setFormErr('') }}
@@ -587,16 +636,31 @@ export default function AdminSavings() {
                           {t.note && ` · ${t.note}`}
                         </p>
                       </div>
-                      <div className="text-right">
-                        <p className={`text-sm font-semibold
-                          ${t.type === 'withdrawal'
-                            ? 'text-red-600' : 'text-green-700'}`}>
-                          {t.type === 'withdrawal' ? '-' : '+'}
-                          {fmt(t.amount)}
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          Bal: {fmt(t.balance_after)}
-                        </p>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <p className={`text-sm font-semibold
+                            ${t.type === 'withdrawal'
+                              ? 'text-red-600' : 'text-green-700'}`}>
+                            {t.type === 'withdrawal' ? '-' : '+'}
+                            {fmt(t.amount)}
+                          </p>
+                          <p className="text-xs text-gray-400">
+                            Bal: {fmt(t.balance_after)}
+                          </p>
+                        </div>
+                        {/* Only show edit for deposit and withdrawal — not interest */}
+                        {(t.type === 'deposit' || t.type === 'withdrawal') && (
+                          <button
+                            onClick={() => setEditTxn({
+                              transaction: t,
+                              type: t.type === 'deposit'
+                                ? 'savings_deposit' : 'savings_withdrawal'
+                            })}
+                            className="text-xs text-primary-600 hover:text-primary-800
+                                       font-medium">
+                            Edit
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -1185,6 +1249,95 @@ export default function AdminSavings() {
         </div>
       )}
 
+      {editTxn && (
+        <EditTransactionModal
+          type={editTxn.type}
+          transaction={editTxn.transaction}
+          accounts={cashAccounts}
+          onClose={() => setEditTxn(null)}
+          onSuccess={() => {
+            setEditTxn(null)
+            fetchAll()
+            if (selected) fetchTxns(selected.id)
+          }}
+        />
+      )}
+
+      {showReverseInterest && (
+        <Modal title="Reverse interest application" onClose={() => setShowReverseInterest(false)}>
+          <form onSubmit={handleReverseInterest} className="space-y-4">
+            {reverseErr && <ErrorBox msg={reverseErr} />}
+
+            <div className="bg-red-50 border border-red-100 rounded-lg px-4 py-3">
+              <p className="text-xs text-red-700">
+                ⚠️ This will permanently remove all interest credits for the
+                selected month and restore savings balances to their
+                pre-interest state. Use only if interest was applied in error.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Fiscal Year <span className="text-red-500">*</span>
+              </label>
+              <select
+                className="input-field"
+                value={reverseForm.fiscal_year}
+                onChange={async (e) => {
+                  const fy = e.target.value
+                  setReverseForm({ ...reverseForm, fiscal_year: fy, bs_year: '', bs_month: '' })
+                  if (fy) {
+                    try {
+                      const res = await api.get(`/fiscal-years/months/?fy=${fy}`)
+                      setRevMonthOpts(res.data.months || [])
+                    } catch { setRevMonthOpts([]) }
+                  }
+                }}
+                required>
+                <option value="">Select fiscal year...</option>
+                {fiscalYears.map(fy => (
+                  <option key={fy} value={fy}>{fy}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Month <span className="text-red-500">*</span>
+              </label>
+              <select
+                className="input-field"
+                value={reverseForm.bs_month && reverseForm.bs_year
+                  ? `${reverseForm.bs_year}-${reverseForm.bs_month}` : ''}
+                onChange={(e) => {
+                  if (!e.target.value) return
+                  const [y, m] = e.target.value.split('-')
+                  setReverseForm({ ...reverseForm, bs_year: y, bs_month: m })
+                }}
+                disabled={!reverseForm.fiscal_year}
+                required>
+                <option value="">Select month...</option>
+                {revMonthOpts.map(m => (
+                  <option key={`${m.bs_year}-${m.bs_month}`}
+                    value={`${m.bs_year}-${m.bs_month}`}>
+                    {m.month_name} {m.bs_year}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex gap-3 pt-1">
+              <button type="button" onClick={() => setShowReverseInterest(false)}
+                className="btn-secondary flex-1">Cancel</button>
+              <button type="submit" disabled={reverseLoad}
+                className="flex-1 py-2 rounded-lg bg-red-600 hover:bg-red-700
+                          text-white font-medium text-sm">
+                {reverseLoad ? 'Reversing...' : 'Reverse interest'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </AdminLayout>
   )
 }
