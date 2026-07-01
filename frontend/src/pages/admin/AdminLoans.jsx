@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import AdminLayout from '../../components/AdminLayout'
 import api from '../../lib/api'
-import NepaliDatePicker from '../../components/NepaliDatePicker'
 import { toBS, formatBS } from '../../lib/nepaliDate'
 import BSDatePicker from '../../components/BSDatePicker'
 import FiscalYearDatePicker from '../../components/FiscalYearDatePicker'

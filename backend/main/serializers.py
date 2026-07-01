@@ -3,7 +3,7 @@ from decimal import Decimal
 from .models import(
     Penalty, SavingsAccount, SavingsTransaction, Loan, LoanRepayment, Expenditure,
     ExpenditureCategory, Income, IncomeCategory, MemberDocument, Account, AccountTransaction,
-    TrialBalance, CooperativeSettings, Borrower
+    TrialBalance, CooperativeSettings, Borrower, Notice,
 )
 from .services import calculate_loan_summary
 
@@ -327,3 +327,74 @@ class BorrowerSerializer(serializers.ModelSerializer):
 
     def get_photo_url(self, obj):
         return self._build_url(obj, 'photo')
+    
+class NoticeSerializer(serializers.ModelSerializer):
+    created_by_name  = serializers.CharField(
+                           source='created_by.full_name',
+                           read_only=True
+                       )
+    attachment_url   = serializers.SerializerMethodField()
+    unread_count     = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = Notice
+        fields = [
+            'id', 'title', 'body',
+            'attachment', 'attachment_url', 'attachment_type',
+            'is_active', 'is_pinned',
+            'nepali_date', 'published_at',
+            'created_by_name', 'created_at', 'updated_at',
+            'unread_count',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_attachment_url(self, obj):
+        if not obj.attachment:
+            return None
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(obj.attachment.url)
+        return obj.attachment.url
+
+    def get_unread_count(self, obj):
+        # returns how many members haven't read this notice
+        from accounts.models import User
+        total_members = User.objects.filter(
+            role='member', is_active=True
+        ).count()
+        read_count = obj.reads.count()
+        return max(0, total_members - read_count)
+
+
+class MemberNoticeSerializer(serializers.ModelSerializer):
+    """Serializer for member-facing notice view — includes is_read flag."""
+    created_by_name = serializers.CharField(
+                          source='created_by.full_name',
+                          read_only=True
+                      )
+    attachment_url  = serializers.SerializerMethodField()
+    is_read         = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = Notice
+        fields = [
+            'id', 'title', 'body',
+            'attachment_url', 'attachment_type',
+            'is_pinned', 'nepali_date', 'published_at',
+            'created_by_name', 'created_at',
+            'is_read',
+        ]
+
+    def get_attachment_url(self, obj):
+        if not obj.attachment:
+            return None
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(obj.attachment.url)
+        return obj.attachment.url
+
+    def get_is_read(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.reads.filter(member=request.user).exists()

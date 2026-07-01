@@ -35,6 +35,16 @@ function getDaysInBSMonth(year, month) {
   }
 }
 
+function getStartingWeekday(year, month) {
+  try {
+    return new NepaliDate(year, month, 1)
+      .toJsDate()
+      .getDay()
+  } catch {
+    return 0
+  }
+}
+
 /** Get (year, month) boundaries for a fiscal year string like "2081/82" */
 function getFYBounds(fyString) {
   if (!fyString) return null
@@ -289,8 +299,8 @@ export default function FiscalYearDatePicker({
             </p>
 
             <div className="grid grid-cols-7 gap-0.5 mb-1">
-              {['S','M','T','W','T','F','S'].map((d, i) => (
-                <div key={i}
+              {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => (
+                <div key={d}
                   className="text-center text-xs text-gray-400
                              font-medium py-1">
                   {d}
@@ -299,6 +309,9 @@ export default function FiscalYearDatePicker({
             </div>
 
             <div className="grid grid-cols-7 gap-0.5">
+              {Array.from({ length: getStartingWeekday(viewYear, viewMonth) }, (_, i) => (
+                <div key={`e-${i}`} />
+              ))}
               {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(day => {
                 const isSelected = (
                   selYear === viewYear && selMonth === viewMonth && selDay === day
@@ -312,7 +325,7 @@ export default function FiscalYearDatePicker({
                     type="button"
                     onClick={() => selectDay(day)}
                     className={`text-xs py-1.5 rounded-lg transition-colors
-                                font-medium
+                                font-medium text-center
                       ${isSelected
                         ? 'bg-primary-600 text-white'
                         : isToday

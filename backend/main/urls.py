@@ -18,6 +18,7 @@ urlpatterns = [
 
     # ── Member savings (own) ─────────────────────────────────────────────────
     path('member/savings/', views.MemberSavingsView.as_view()),
+    path('member/statement/', views.MemberSavingsStatementView.as_view()),
 
     # ── Loans ─────────────────────────────────────────────────────────────────
     path('loans/', views.AdminListLoansView.as_view()),
@@ -99,4 +100,13 @@ urlpatterns = [
 
      # Reverse interest
      path('savings/reverse-interest/', views.AdminReverseInterestView.as_view()),
+     
+     # Notices — admin
+     path('notices/', views.AdminNoticeListCreateView.as_view()),
+     path('notices/<uuid:notice_id>/', views.AdminNoticeDetailView.as_view()),
+
+     # Notices — member
+     path('member/notices/', views.MemberNoticeListView.as_view()),
+     path('member/notices/<uuid:notice_id>/read/', views.MemberMarkNoticeReadView.as_view()),
+     path('member/notices/unread-count/', views.MemberUnreadNoticeCountView.as_view()),
 ]

@@ -13,7 +13,8 @@ from accounts.permissions import IsAdmin, IsMember
 from .models import (
     SavingsAccount, SavingsTransaction, Loan, LoanRepayment, 
     Expenditure, ExpenditureCategory, Income, IncomeCategory, Account, AccountTransaction,
-    TrialBalance, CooperativeSettings, Penalty, Borrower
+    TrialBalance, CooperativeSettings, Penalty, Borrower, Notice, NoticeRead,
+    
 )
 from .serializers import (
     SavingsAccountSerializer, SavingsTransactionSerializer, 
@@ -22,6 +23,7 @@ from .serializers import (
     ExpenditureCategorySerializer, IncomeSerializer, IncomeCategorySerializer, 
     AccountSerializer, AccountTransactionSerializer, 
     TrialBalanceSerializer, CooperativeSettingsSerializer, PenaltySerializer, BorrowerSerializer,
+    NoticeSerializer, MemberNoticeSerializer
     
 )
 
@@ -382,6 +384,117 @@ class MemberSavingsView(APIView):
         return Response({
             'account':      SavingsAccountSerializer(account).data,
             'transactions': SavingsTransactionSerializer(txns, many=True).data,
+        })
+        
+class MemberSavingsStatementView(APIView):
+    """Member views only their own savings transactions."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .models import SavingsTransaction, Penalty, SavingsAccount
+        from .bs_calendar import get_bs_month_ad_range, get_fiscal_year_ad_range
+        from django.db.models import Sum
+
+        fiscal_year = request.query_params.get('fiscal_year')
+        bs_month    = request.query_params.get('bs_month')
+        bs_year     = request.query_params.get('bs_year')
+        txn_type    = request.query_params.get('type')
+
+        start_ad = None
+        end_ad   = None
+
+        if fiscal_year and bs_month and bs_year:
+            start_ad, end_ad = get_bs_month_ad_range(
+                int(bs_year), int(bs_month)
+            )
+        elif fiscal_year:
+            start_ad, end_ad = get_fiscal_year_ad_range(fiscal_year)
+
+        # get member's savings account
+        try:
+            savings_account = SavingsAccount.objects.get(member=request.user)
+        except SavingsAccount.DoesNotExist:
+            return Response({
+                'rows': [],
+                'summary': {
+                    'total_deposits': '0.00',
+                    'total_withdrawals': '0.00',
+                    'total_interest': '0.00',
+                    'total_penalty': '0.00',
+                    'total_rows': 0,
+                }
+            })
+
+        # savings transactions
+        txns = SavingsTransaction.objects.filter(account=savings_account)
+
+        if start_ad and end_ad:
+            txns = txns.filter(
+                created_at__date__gte=start_ad,
+                created_at__date__lte=end_ad,
+            )
+
+        if txn_type and txn_type != 'penalty':
+            txns = txns.filter(type=txn_type)
+        elif txn_type == 'penalty':
+            txns = SavingsTransaction.objects.none()
+
+        # penalties
+        penalties = Penalty.objects.filter(
+            penalty_type='savings',
+            member=request.user,
+        )
+        if start_ad and end_ad:
+            penalties = penalties.filter(
+                created_at__date__gte=start_ad,
+                created_at__date__lte=end_ad,
+            )
+        if txn_type and txn_type != 'penalty':
+            penalties = Penalty.objects.none()
+
+        rows = []
+        for t in txns.order_by('created_at'):
+            rows.append({
+                'date_ad':     t.created_at.date().isoformat(),
+                'nepali_date': '',
+                'type':        t.type,
+                'type_label':  t.type.replace('_', ' ').title(),
+                'amount':      str(t.amount),
+                'note':        t.note or '',
+                'source':      'transaction',
+            })
+
+        for p in penalties.order_by('created_at'):
+            rows.append({
+                'date_ad':     p.created_at.date().isoformat(),
+                'nepali_date': p.nepali_date or '',
+                'type':        'penalty',
+                'type_label':  'Penalty',
+                'amount':      str(p.amount),
+                'note':        p.reason or '',
+                'source':      'penalty',
+            })
+
+        rows.sort(key=lambda r: r['date_ad'])
+
+        from decimal import Decimal
+        return Response({
+            'rows': rows,
+            'summary': {
+                'total_deposits':    str(sum(
+                    Decimal(r['amount']) for r in rows if r['type'] == 'deposit'
+                )),
+                'total_withdrawals': str(sum(
+                    Decimal(r['amount']) for r in rows if r['type'] == 'withdrawal'
+                )),
+                'total_interest':    str(sum(
+                    Decimal(r['amount']) for r in rows if r['type'] == 'interest_credit'
+                )),
+                'total_penalty':     str(sum(
+                    Decimal(r['amount']) for r in rows if r['type'] == 'penalty'
+                )),
+                'total_rows': len(rows),
+            }
         })
         
 
@@ -1440,7 +1553,7 @@ class AdminPenaltyListView(APIView):
         return Response(PenaltySerializer(penalties, many=True).data)
     
 class FiscalYearListView(APIView):
-    permission_classes = [IsAdmin]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         years = get_available_fiscal_years()
@@ -1448,7 +1561,7 @@ class FiscalYearListView(APIView):
 
 
 class FiscalYearMonthsView(APIView):
-    permission_classes = [IsAdmin]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         fy_string = request.query_params.get('fy')
@@ -1764,3 +1877,201 @@ class AdminReverseInterestView(APIView):
             })
         except ValueError as e:
             return Response({'error': str(e)}, status=400)
+        
+class AdminNoticeListCreateView(APIView):
+    permission_classes = [IsAdmin]
+    parser_classes     = [MultiPartParser, FormParser]
+
+    def get(self, request):
+        notices = Notice.objects.all()
+        return Response(
+            NoticeSerializer(
+                notices,
+                many=True,
+                context={'request': request}
+            ).data
+        )
+
+    def post(self, request):
+        title       = request.data.get('title', '').strip()
+        body        = request.data.get('body', '').strip()
+        nepali_date = request.data.get('nepali_date', '').strip()
+        is_pinned   = request.data.get('is_pinned', False)
+        attachment  = request.FILES.get('attachment')
+
+        if not title:
+            return Response(
+                {'error': 'Title is required.'},
+                status=400
+            )
+        if not nepali_date:
+            return Response(
+                {'error': 'Date is required.'},
+                status=400
+            )
+
+        # convert BS date to AD for published_at
+        from .bs_calendar import bs_to_ad
+        try:
+            parts        = nepali_date.split('-')
+            published_at = bs_to_ad(
+                int(parts[0]), int(parts[1]), int(parts[2])
+            )
+        except (ValueError, IndexError):
+            return Response(
+                {'error': 'Invalid date format.'},
+                status=400
+            )
+
+        # validate attachment
+        attachment_type = ''
+        if attachment:
+            allowed_pdf   = ['application/pdf']
+            allowed_image = ['image/jpeg', 'image/jpg',
+                             'image/png', 'image/webp']
+            if attachment.content_type in allowed_pdf:
+                attachment_type = 'pdf'
+            elif attachment.content_type in allowed_image:
+                attachment_type = 'image'
+            else:
+                return Response(
+                    {'error': 'Only PDF or image files allowed.'},
+                    status=400
+                )
+            if attachment.size > 10 * 1024 * 1024:
+                return Response(
+                    {'error': 'File size must be less than 10MB.'},
+                    status=400
+                )
+
+        notice = Notice.objects.create(
+            title           = title,
+            body            = body,
+            nepali_date     = nepali_date,
+            published_at    = published_at,
+            is_pinned       = is_pinned in [True, 'true', 'True', '1'],
+            attachment      = attachment,
+            attachment_type = attachment_type,
+            created_by      = request.user,
+        )
+
+        return Response(
+            NoticeSerializer(notice, context={'request': request}).data,
+            status=201
+        )
+
+
+class AdminNoticeDetailView(APIView):
+    permission_classes = [IsAdmin]
+    parser_classes     = [MultiPartParser, FormParser]
+
+    def get(self, request, notice_id):
+        notice = get_object_or_404(Notice, id=notice_id)
+        return Response(
+            NoticeSerializer(notice, context={'request': request}).data
+        )
+
+    def patch(self, request, notice_id):
+        notice = get_object_or_404(Notice, id=notice_id)
+
+        title       = request.data.get('title', notice.title).strip()
+        body        = request.data.get('body', notice.body).strip()
+        nepali_date = request.data.get('nepali_date', notice.nepali_date).strip()
+        is_pinned   = request.data.get('is_pinned', notice.is_pinned)
+        is_active   = request.data.get('is_active', notice.is_active)
+        attachment  = request.FILES.get('attachment')
+
+        if not title:
+            return Response({'error': 'Title is required.'}, status=400)
+
+        # update published_at if date changed
+        if nepali_date != notice.nepali_date:
+            from .bs_calendar import bs_to_ad
+            try:
+                parts            = nepali_date.split('-')
+                notice.published_at = bs_to_ad(
+                    int(parts[0]), int(parts[1]), int(parts[2])
+                )
+            except (ValueError, IndexError):
+                return Response(
+                    {'error': 'Invalid date format.'},
+                    status=400
+                )
+
+        if attachment:
+            allowed_pdf   = ['application/pdf']
+            allowed_image = ['image/jpeg', 'image/jpg',
+                             'image/png', 'image/webp']
+            if attachment.content_type in allowed_pdf:
+                notice.attachment_type = 'pdf'
+            elif attachment.content_type in allowed_image:
+                notice.attachment_type = 'image'
+            else:
+                return Response(
+                    {'error': 'Only PDF or image files allowed.'},
+                    status=400
+                )
+            if attachment.size > 10 * 1024 * 1024:
+                return Response(
+                    {'error': 'File size must be less than 10MB.'},
+                    status=400
+                )
+            notice.attachment = attachment
+
+        notice.title       = title
+        notice.body        = body
+        notice.nepali_date = nepali_date
+        notice.is_pinned   = is_pinned in [True, 'true', 'True', '1']
+        notice.is_active   = is_active in [True, 'true', 'True', '1']
+        notice.save()
+
+        return Response(
+            NoticeSerializer(notice, context={'request': request}).data
+        )
+
+    def delete(self, request, notice_id):
+        notice = get_object_or_404(Notice, id=notice_id)
+        notice.delete()
+        return Response({'message': 'Notice deleted.'}, status=204)
+
+
+class MemberNoticeListView(APIView):
+    """Members see only active notices."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        notices = Notice.objects.filter(is_active=True)
+        return Response(
+            MemberNoticeSerializer(
+                notices,
+                many=True,
+                context={'request': request}
+            ).data
+        )
+
+
+class MemberMarkNoticeReadView(APIView):
+    """Mark a notice as read for the current member."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, notice_id):
+        notice = get_object_or_404(Notice, id=notice_id, is_active=True)
+        NoticeRead.objects.get_or_create(
+            notice=notice,
+            member=request.user
+        )
+        return Response({'message': 'Marked as read.'})
+
+
+class MemberUnreadNoticeCountView(APIView):
+    """Returns count of unread notices for the badge."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        total_active = Notice.objects.filter(is_active=True).count()
+        read_count   = NoticeRead.objects.filter(
+            member=request.user,
+            notice__is_active=True
+        ).count()
+        unread = max(0, total_active - read_count)
+        return Response({'unread_count': unread})

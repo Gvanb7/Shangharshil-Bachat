@@ -1,42 +1,28 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import MemberLayout from '../../components/MemberLayout'
 import useAuthStore from '../../store/authStore'
 import api from '../../lib/api'
-import ProfilePicture from '../../components/ProfilePicture'
 import { toBS, formatBS } from '../../lib/nepaliDate'
+import {
+  LuClock, LuTrendingUp, LuTrendingDown, LuSparkles, LuFileText,
+  LuMegaphone, LuHandshake, LuUser, LuPin, LuCreditCard, 
+  LuArrowUpRight, LuArrowDownLeft, LuChevronRight, 
+} from 'react-icons/lu'
 
 export default function MemberDashboard() {
-  const { user, updateUser } = useAuthStore()
-  const [savings, setSavings] = useState(null)
-  const [loans,   setLoans]   = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error,   setError]   = useState('')
-
-  const [showPwForm, setShowPwForm] = useState(false)
-  const [pwForm,     setPwForm]     = useState({
-    current_password: '', new_password: '', confirm_password: ''
-  })
-  const [pwErr,     setPwErr]     = useState('')
-  const [pwSuccess, setPwSuccess] = useState('')
-  const [pwLoad,    setPwLoad]    = useState(false)
-  const [showPw,    setShowPw]    = useState(false)
-
-  const [editProfile,    setEditProfile]    = useState(false)
-  const [profileForm,    setProfileForm]    = useState({
-    full_name: '', phone: '', address: ''
-  })
-  const [profileErr,     setProfileErr]     = useState('')
-  const [profileLoad,    setProfileLoad]    = useState(false)
-  const [profileSuccess, setProfileSuccess] = useState('')
-
-  const [showLoanForm, setShowLoanForm] = useState(false)
-  const [loanForm,     setLoanForm]     = useState({ principal: '', purpose: '' })
-  const [loanFormErr,  setLoanFormErr]  = useState('')
-  const [loanFormLoad, setLoanFormLoad] = useState(false)
-  const [loanSuccess,  setLoanSuccess]  = useState('')
-  const [cancelLoad,   setCancelLoad]   = useState(false)
-
-  const [penalties, setPenalties] = useState([])
+  const { user }         = useAuthStore()
+  const [savings,        setSavings]        = useState(null)
+  const [loans,          setLoans]          = useState([])
+  const [notices,        setNotices]        = useState([])
+  const [loading,        setLoading]        = useState(true)
+  const [error,          setError]          = useState('')
+  const [showLoanModal,  setShowLoanModal]  = useState(false)
+  const [loanForm,       setLoanForm]       = useState({ principal: '', purpose: '' })
+  const [loanErr,        setLoanErr]        = useState('')
+  const [loanLoad,       setLoanLoad]       = useState(false)
+  const [loanSuccess,    setLoanSuccess]    = useState('')
+  const [cancelLoad,     setCancelLoad]     = useState(false)
 
   useEffect(() => { fetchData() }, [])
 
@@ -44,68 +30,44 @@ export default function MemberDashboard() {
     setLoading(true)
     setError('')
     try {
-      const [savRes, loanRes, profileRes] = await Promise.all([
+      const [savRes, loanRes, noticeRes] = await Promise.all([
         api.get('/member/savings/').catch(() => null),
         api.get('/member/loans/').catch(() => null),
-        api.get('/auth/me/'),
-        api.get('/member/penalties/').catch(() => null)
+        api.get('/member/notices/').catch(() => null),
       ])
-      if (savRes)     setSavings(savRes.data)
-      if (loanRes)    setLoans(loanRes.data)
-      if (profileRes) updateUser(profileRes.data)
+      if (savRes)    setSavings(savRes.data)
+      if (loanRes)   setLoans(loanRes.data)
+      if (noticeRes) setNotices(noticeRes.data.slice(0, 4))
     } catch {
-      setError('Failed to load your data.')
+      setError('Failed to load dashboard data.')
     } finally {
       setLoading(false)
     }
   }
 
-  async function handleUpdateProfile(e) {
-    e.preventDefault()
-    setProfileErr('')
-    setProfileSuccess('')
-    setProfileLoad(true)
-    try {
-      const res = await api.patch('/auth/complete-profile/', profileForm)
-      updateUser(res.data)
-      setProfileSuccess('Profile updated successfully.')
-      setEditProfile(false)
-    } catch (err) {
-      const data = err.response?.data
-      if (data && typeof data === 'object') {
-        const first = Object.values(data)[0]
-        setProfileErr(Array.isArray(first) ? first[0] : first)
-      } else {
-        setProfileErr('Failed to update profile.')
-      }
-    } finally {
-      setProfileLoad(false)
-    }
-  }
-
   async function handleApplyLoan(e) {
     e.preventDefault()
-    setLoanFormErr('')
+    setLoanErr('')
     if (!loanForm.principal || parseFloat(loanForm.principal) <= 0) {
-      setLoanFormErr('Enter a valid principal amount.')
+      setLoanErr('Enter a valid amount.')
       return
     }
     if (!loanForm.purpose.trim()) {
-      setLoanFormErr('Purpose is required.')
+      setLoanErr('Purpose is required.')
       return
     }
-    setLoanFormLoad(true)
+    setLoanLoad(true)
     try {
       await api.post('/member/loans/apply/', loanForm)
       setLoanSuccess('Loan application submitted successfully.')
-      setShowLoanForm(false)
+      setShowLoanModal(false)
       setLoanForm({ principal: '', purpose: '' })
       fetchData()
       setTimeout(() => setLoanSuccess(''), 4000)
     } catch (err) {
-      setLoanFormErr(err.response?.data?.error || 'Failed to submit application.')
+      setLoanErr(err.response?.data?.error || 'Failed to submit.')
     } finally {
-      setLoanFormLoad(false)
+      setLoanLoad(false)
     }
   }
 
@@ -115,34 +77,9 @@ export default function MemberDashboard() {
       await api.delete(`/member/loans/${loanId}/cancel/`)
       fetchData()
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to cancel application.')
+      alert(err.response?.data?.error || 'Failed to cancel.')
     } finally {
       setCancelLoad(false)
-    }
-  }
-
-  async function handleChangePassword(e) {
-    e.preventDefault()
-    setPwErr('')
-    setPwSuccess('')
-    if (pwForm.new_password !== pwForm.confirm_password) {
-      setPwErr('New passwords do not match.')
-      return
-    }
-    if (pwForm.new_password.length < 8) {
-      setPwErr('Password must be at least 8 characters.')
-      return
-    }
-    setPwLoad(true)
-    try {
-      await api.post('/auth/change-password/', pwForm)
-      setPwSuccess('Password changed successfully.')
-      setPwForm({ current_password: '', new_password: '', confirm_password: '' })
-      setShowPwForm(false)
-    } catch (err) {
-      setPwErr(err.response?.data?.error || 'Failed to change password.')
-    } finally {
-      setPwLoad(false)
     }
   }
 
@@ -152,13 +89,50 @@ export default function MemberDashboard() {
     })}`
   }
 
-  const activeLoans = loans.filter(l => l.status === 'active')
+  function getGreeting() {
+    const hour = new Date().getHours()
+
+    if (hour < 12) return 'Good Morning'
+    if (hour < 17) return 'Good Afternoon'
+    if (hour < 20) return 'Good Evening'
+    return 'Good Night'
+  }
+
+  const activeLoans   = loans.filter(l => l.status === 'active')
+  const closedLoans   = loans.filter(l => l.status === 'closed')
+  const pendingLoans  = loans.filter(l => l.status === 'pending')
+  const unreadNotices = notices.filter(n => !n.is_read).length
+
+  // total ever borrowed and total ever paid — real stats for this member
+  const totalBorrowed = loans.reduce(
+    (sum, l) => sum + parseFloat(l.principal || 0), 0
+  )
+  const totalPaidAllLoans = loans.reduce(
+    (sum, l) => sum + parseFloat(l.amount_paid || 0), 0
+  )
+  const totalOutstanding = activeLoans.reduce(
+    (sum, l) => sum + parseFloat(l.amount_remaining || 0), 0
+  )
+
+  const nextEMI = (() => {
+    for (const loan of activeLoans) {
+      if (loan.due_date && loan.amount_remaining > 0) {
+        return { amount: loan.monthly_installment, due_date: loan.due_date }
+      }
+    }
+    return null
+  })()
 
   if (loading) {
     return (
       <MemberLayout>
         <div className="flex items-center justify-center h-64">
-          <p className="text-gray-400 text-sm">Loading your dashboard...</p>
+          <div className="text-center space-y-3">
+            <div className="w-8 h-8 border-2 border-indigo-600
+                            border-t-transparent rounded-full animate-spin
+                            mx-auto" />
+            <p className="text-sm text-gray-400">Loading...</p>
+          </div>
         </div>
       </MemberLayout>
     )
@@ -166,236 +140,401 @@ export default function MemberDashboard() {
 
   return (
     <MemberLayout>
-      <div className="space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-        {/* ── Profile header card ──────────────────────────────────────── */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100
-                        p-5 sm:p-6 flex flex-col sm:flex-row items-center
-                        gap-4 sm:gap-5">
-          <ProfilePicture />
-          <div className="text-center sm:text-left flex-1 min-w-0">
-            <p className="text-xs text-gray-400 font-medium uppercase
-                          tracking-wide">
-              Welcome back
-            </p>
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-800
-                           truncate">
-              {user?.full_name || user?.email}
-            </h1>
-            <p className="text-sm text-gray-500 mt-0.5">{user?.email}</p>
-          </div>
-        </div>
+        {/* ══════════════ LEFT COLUMN (2/3) ══════════════ */}
+        <div className="lg:col-span-2 space-y-5">
 
-        {/* ── Summary cards ────────────────────────────────────────────── */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-          <SummaryCard
-            icon="💰"
-            label="Savings Balance"
-            value={fmt(savings?.account?.balance)}
-            accent="emerald"
-          />
-          <SummaryCard
-            icon="📋"
-            label="Active Loans"
-            value={activeLoans.length}
-            accent="blue"
-          />
-          <SummaryCard
-            icon="📁"
-            label="Total Loans"
-            value={loans.length}
-            accent="amber"
-          />
-        </div>
+          {/* Welcome hero */}
+          <div className="bg-gradient-to-br from-indigo-600 via-indigo-700
+                          to-blue-800 rounded-2xl p-6 text-white shadow-lg
+                          relative overflow-hidden">
+            <div className="absolute -top-10 -right-10 w-44 h-44 rounded-full
+                            bg-white/5 pointer-events-none" />
+            <div className="absolute -bottom-12 -left-8 w-32 h-32 rounded-full
+                            bg-white/5 pointer-events-none" />
 
-        {/* Error */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-600
-                          px-4 py-3 rounded-xl text-sm">
-            {error}
-          </div>
-        )}
+            <div className="relative z-10">
+              <div className="flex items-start justify-between gap-4 mb-5">
+                <div className="min-w-0">
+                  <p className="text-indigo-200 text-xs font-semibold uppercase tracking-widest">
+                    {getGreeting()}
+                  </p>
 
-        {/* ── Savings section ──────────────────────────────────────────── */}
-        <Section title="Savings" icon="💰">
-          {!savings ? (
-            <EmptyState text="No savings account available" />
-          ) : (
-            <>
-              <div className="bg-gradient-to-br from-emerald-700 to-teal-600
-                              text-white rounded-2xl p-5 sm:p-6 shadow-sm
-                              mb-4">
-                <p className="text-xs uppercase tracking-wide text-emerald-100
-                              font-medium">
-                  Current Balance
-                </p>
-                <h2 className="text-2xl sm:text-3xl font-bold mt-1">
-                  {fmt(savings.account.balance)}
-                </h2>
-                <div className="flex gap-2 mt-3 flex-wrap">
-                  <Pill>{savings.account.interest_rate}% interest p.a.</Pill>
-                  <Pill>
-                    {savings.account.is_active ? 'Active account' : 'Inactive'}
-                  </Pill>
+                  <h1 className="text-2xl sm:text-3xl font-bold mt-1 leading-tight">
+                    {user?.full_name || user?.email}
+                  </h1>
+
+                  <p className="text-indigo-300 text-xs mt-1.5">
+                    Member since {toBS(user?.date_joined)}
+                  </p>
                 </div>
               </div>
 
-              <p className="text-xs font-semibold text-gray-500
-                            uppercase tracking-wide mb-2">
-                Recent transactions
-              </p>
+              {/* Real statistics row */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <StatPill label="Savings Balance" value={fmt(savings?.account?.balance)} />
+                <StatPill label="Total Borrowed" value={fmt(totalBorrowed)} />
+                <StatPill label="Total Repaid" value={fmt(totalPaidAllLoans)} />
+                <StatPill
+                  label="Outstanding"
+                  value={fmt(totalOutstanding)}
+                  highlight={totalOutstanding > 0}
+                />
+              </div>
+            </div>
+          </div>
 
-              {savings.transactions.length === 0 ? (
-                <EmptyState text="No transactions yet" small />
-              ) : (
-                <div className="space-y-1.5">
-                  {savings.transactions.map((t) => (
-                    <div key={t.id}
-                      className="flex justify-between items-center
-                                 px-4 py-3 rounded-xl bg-gray-50
-                                 border border-gray-100">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-gray-800
-                                      capitalize">
-                          {t.type.replace('_', ' ')}
-                        </p>
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          {toBS(t.created_at)}
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-600
+                            px-4 py-3 rounded-xl text-sm">
+              {error}
+            </div>
+          )}
+          {loanSuccess && (
+            <div className="bg-emerald-50 border border-emerald-200
+                            text-emerald-700 px-4 py-3 rounded-xl text-sm">
+              ✓ {loanSuccess}
+            </div>
+          )}
+
+          {/* Next EMI reminder */}
+          {nextEMI && (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl
+                            p-4 flex items-center gap-3">
+              <div className="w-11 h-11 bg-amber-100 rounded-xl flex
+                              items-center justify-center text-xl
+                              flex-shrink-0">
+                <LuClock size={20} className="text-amber-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-amber-900">
+                  Next EMI due
+                </p>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  {fmt(nextEMI.amount)} · {toBS(nextEMI.due_date)}
+                </p>
+              </div>
+              <span className="text-xs text-amber-600 font-medium
+                               flex-shrink-0">
+                Contact admin <LuChevronRight size={14} />
+              </span>
+            </div>
+          )}
+
+          {/* Savings card */}
+          {savings ? (
+            <section className="bg-white rounded-2xl border border-gray-100
+                                shadow-sm overflow-hidden">
+              <div className="bg-gradient-to-r from-emerald-500
+                              to-teal-500 p-5 text-white flex items-center
+                              justify-between gap-4">
+                <div>
+                  <p className="text-emerald-100 text-xs font-semibold
+                                 uppercase tracking-wide">
+                    Savings Balance
+                  </p>
+                  <p className="text-3xl font-bold mt-1">
+                    {fmt(savings.account.balance)}
+                  </p>
+                  <div className="flex items-center gap-3 mt-2">
+                    <span className="text-xs text-emerald-100">
+                      {savings.account.interest_rate}% p.a.
+                    </span>
+                    <span className="w-1 h-1 bg-emerald-300 rounded-full" />
+                    <span className="text-xs text-emerald-100">
+                      {savings.account.is_active ? '✓ Active' : 'Inactive'}
+                    </span>
+                  </div>
+                </div>
+                <div className="text-5xl opacity-20"><LuCreditCard size={48} className="opacity-20" /></div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between
+                                px-5 pt-4 pb-2">
+                  <p className="text-xs font-bold text-gray-500 uppercase
+                                 tracking-wide">
+                    Recent Transactions
+                  </p>
+                  <Link to="/member/statement"
+                    className="text-xs text-indigo-600 font-medium
+                               hover:text-indigo-700">
+                    See all →
+                  </Link>
+                </div>
+
+                {savings.transactions.length === 0 ? (
+                  <div className="px-5 pb-5 text-center text-gray-400
+                                  text-sm py-6">
+                    No transactions yet
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-50">
+                    {savings.transactions.slice(0, 6).map(t => (
+                      <div key={t.id}
+                        className="px-5 py-3 flex items-center
+                                   justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={`w-9 h-9 rounded-xl flex
+                                           items-center justify-center
+                                           text-sm flex-shrink-0
+                            ${t.type === 'withdrawal'
+                              ? 'bg-red-50'
+                              : t.type === 'interest_credit'
+                                ? 'bg-blue-50'
+                                : 'bg-emerald-50'
+                            }`}>
+                            {t.type === 'withdrawal' ? <LuArrowUpRight size={16} className="text-red-500" />:
+                             t.type === 'interest_credit' ? <LuSparkles size={16} className="text-blue-500" /> : <LuArrowDownLeft size={16} className="text-emerald-500" />}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-800
+                                          capitalize truncate">
+                              {t.type.replace('_', ' ')}
+                            </p>
+                            <p className="text-xs text-gray-400">
+                              {toBS(t.created_at)}
+                            </p>
+                          </div>
+                        </div>
+                        <p className={`text-sm font-bold flex-shrink-0
+                          ${t.type === 'withdrawal'
+                            ? 'text-red-500' : 'text-emerald-600'}`}>
+                          {t.type === 'withdrawal' ? '-' : '+'}{fmt(t.amount)}
                         </p>
                       </div>
-                      <p className={`font-semibold text-sm flex-shrink-0
-                        ${t.type === 'withdrawal'
-                          ? 'text-red-500' : 'text-emerald-700'}`}>
-                        {t.type === 'withdrawal' ? '-' : '+'}{fmt(t.amount)}
-                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+          ) : (
+            <div className="bg-white border border-gray-100 rounded-2xl
+                            shadow-sm p-8 text-center">
+              <p className="text-4xl mb-2"><LuCreditCard size={40} className="text-gray-300 mx-auto mb-2" /></p>
+              <p className="text-sm text-gray-500">
+                No savings account yet. Contact your administrator.
+              </p>
+            </div>
+          )}
+
+          {/* Active loans */}
+          {activeLoans.length > 0 && (
+            <section>
+              <p className="text-xs font-bold text-gray-500 uppercase
+                             tracking-wide mb-2.5">
+                Active Loans
+              </p>
+              <div className="space-y-3">
+                {activeLoans.map(loan => (
+                  <ActiveLoanCard key={loan.id} loan={loan} fmt={fmt} />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Pending loan applications */}
+          {pendingLoans.map(loan => (
+            <div key={loan.id}
+              className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <span className="text-xs bg-amber-100 text-amber-700
+                                   px-2 py-0.5 rounded-full font-medium">
+                    Pending
+                  </span>
+                  <p className="text-sm font-semibold text-gray-800 mt-1.5">
+                    {fmt(loan.principal)}
+                  </p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    <LuLoader size={14} className="inline mr-1 text-amber-600" />
+                    Application under review by administrator
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleCancelLoan(loan.id)}
+                  disabled={cancelLoad === loan.id}
+                  className="text-xs text-red-500 hover:text-red-700
+                             font-medium underline flex-shrink-0">
+                  {cancelLoad === loan.id ? 'Cancelling...' : 'Cancel'}
+                </button>
+              </div>
+            </div>
+          ))}
+
+        </div>
+
+        {/* ══════════════ RIGHT COLUMN (1/3) ══════════════ */}
+        <div className="space-y-5">
+
+          {/* Quick actions */}
+          <div className="bg-white rounded-2xl border border-gray-100
+                          shadow-sm p-4">
+            <p className="text-xs font-bold text-gray-500 uppercase
+                           tracking-wide mb-3">
+              Quick Actions
+            </p>
+            <div className="grid grid-cols-2 gap-2.5">
+              <QuickAction Icon={LuFileText} label="Statement" to="/member/statement" />
+              <QuickAction Icon={LuMegaphone} label="Notices" to="/member/notices" />
+              <QuickAction
+                Icon={LuHandshake}
+                label="Apply Loan"
+                onClick={() => { setShowLoanModal(true); setLoanErr('') }}
+                disabled={loans.some(l => l.status === 'pending')}
+              />
+              <QuickAction Icon={LuUser} label="Profile" to="/member/profile" />
+            </div>
+          </div>
+
+          {/* Recent notices */}
+          <div className="bg-white rounded-2xl border border-gray-100
+                          shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-4 pt-4
+                            pb-2">
+              <p className="text-xs font-bold text-gray-500 uppercase
+                             tracking-wide flex items-center gap-1.5">
+                Notices
+                {unreadNotices > 0 && (
+                  <span className="bg-indigo-100 text-indigo-700 text-[10px]
+                                   font-bold px-1.5 py-0.5 rounded-full">
+                    {unreadNotices} new
+                  </span>
+                )}
+              </p>
+              <Link to="/member/notices"
+                className="text-xs text-indigo-600 font-medium
+                           hover:text-indigo-700">
+                All →
+              </Link>
+            </div>
+
+            {notices.length === 0 ? (
+              <div className="px-4 pb-4 text-center text-gray-400 text-sm
+                              py-6">
+                No notices yet
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-50">
+                {notices.map(notice => (
+                  <Link key={notice.id} to="/member/notices"
+                    className="block px-4 py-3 hover:bg-gray-50
+                               transition-colors">
+                    <div className="mb-5">
+                      <span className="text-base flex-shrink-0">
+                        {notice.is_pinned ? '📌' : '📢'}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-xs font-semibold text-gray-800
+                                        truncate">
+                            {notice.title}
+                          </p>
+                          {!notice.is_read && (
+                            <span className="w-1.5 h-1.5 bg-indigo-500
+                                             rounded-full flex-shrink-0" />
+                          )}
+                        </div>
+                        <p className="text-[11px] text-gray-400 mt-0.5">
+                          {notice.nepali_date
+                            ? formatBS(notice.nepali_date)
+                            : notice.published_at}
+                        </p>
+                      </div>
                     </div>
-                  ))}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Apply loan prompt — only if no active/pending */}
+          {!loans.some(l => l.status === 'pending') &&
+           activeLoans.length === 0 && (
+            <div className="bg-indigo-50 border border-indigo-100
+                            rounded-2xl p-4">
+              <p className="text-sm font-semibold text-indigo-900">
+                Need a loan?
+              </p>
+              <p className="text-xs text-indigo-600 mt-1 leading-relaxed">
+                Apply and the administrator will review your request.
+              </p>
+              <button
+                onClick={() => { setShowLoanModal(true); setLoanErr('') }}
+                className="w-full mt-3 bg-indigo-600 text-white text-xs
+                           font-semibold py-2.5 rounded-xl
+                           hover:bg-indigo-700 transition-colors">
+                Apply now
+              </button>
+            </div>
+          )}
+
+          {/* Cooperative info strip */}
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900
+                          rounded-2xl p-4 text-white">
+            <p className="text-xs font-bold uppercase tracking-wide
+                          text-slate-300">
+              About Us
+            </p>
+            <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+              Shangharshil Yuva Bachat Samuha is a community-driven
+              cooperative helping members build savings discipline and
+              access fair loans since 2073 BS.
+            </p>
+          </div>
+
+        </div>
+      </div>
+
+      {/* ── Loan application modal ────────────────────────────────── */}
+      {showLoanModal && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center
+                        justify-center bg-black bg-opacity-40 px-4 pb-4
+                        sm:pb-0">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="px-5 py-4 border-b border-gray-100 flex
+                            items-center justify-between">
+              <h3 className="font-semibold text-gray-800">Apply for loan</h3>
+              <button onClick={() => setShowLoanModal(false)}
+                className="text-gray-400 hover:text-gray-600 text-xl">
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleApplyLoan} className="px-5 py-4 space-y-4">
+              {loanErr && (
+                <div className="px-3 py-2 bg-red-50 border border-red-200
+                                text-red-700 rounded-lg text-sm">
+                  {loanErr}
                 </div>
               )}
-            </>
-          )}
-        </Section>
-
-        {/* ── Loans section ─────────────────────────────────────────────── */}
-        <Section
-          title="Loans"
-          icon="📋"
-          action={
-            !loans.some(l => l.status === 'pending') && (
-              <button
-                onClick={() => {
-                  setShowLoanForm(true)
-                  setLoanFormErr('')
-                  setLoanForm({ principal: '', purpose: '' })
-                }}
-                className="text-xs font-medium bg-emerald-700
-                           hover:bg-emerald-800 text-white px-3 py-1.5
-                           rounded-lg transition-colors">
-                + Apply for loan
-              </button>
-            )
-          }>
-
-          {loanSuccess && (
-            <div className="mb-3 px-4 py-3 bg-emerald-50 border
-                            border-emerald-200 text-emerald-700
-                            rounded-xl text-sm">
-              {loanSuccess}
-            </div>
-          )}
-
-          {loans.length === 0 ? (
-            <EmptyState text='No loans on record. Click "Apply for loan" to get started.' />
-          ) : (
-            <div className="space-y-3">
-              {loans.map((loan) => (
-                <LoanCard
-                  key={loan.id}
-                  loan={loan}
-                  fmt={fmt}
-                  onCancel={handleCancelLoan}
-                  cancelLoad={cancelLoad}
-                />
-              ))}
-            </div>
-          )}
-        </Section>
-
-        {penalties.length > 0 && (
-          <Section title="Penalties" icon="⚠️">
-            <div className="space-y-1.5">
-              {penalties.map((p) => (
-                <div key={p.id}
-                  className="flex justify-between items-center px-4 py-3
-                            rounded-xl bg-amber-50 border border-amber-100">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-800">
-                      {p.penalty_type === 'savings'
-                        ? 'Savings Penalty' : 'Loan Penalty'}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {p.reason || 'No reason specified'}
-                    </p>
-                    <p className="text-xs text-gray-400">
-                      {formatBS(p.nepali_date)}
-                    </p>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-sm font-semibold text-amber-700">
-                      {fmt(p.amount)}
-                    </p>
-                    {p.penalty_type === 'loan' && (
-                      <p className="text-xs text-gray-400">
-                        {p.is_paid ? 'Paid' : `Rs. ${p.amount_remaining} pending`}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Section>
-        )}
-
-        {/* Loan application modal */}
-        {showLoanForm && (
-          <Modal
-            title="Apply for loan"
-            onClose={() => setShowLoanForm(false)}>
-            <form onSubmit={handleApplyLoan} className="space-y-4">
-              {loanFormErr && <ErrorBox msg={loanFormErr} />}
-
               <div>
                 <label className="block text-sm font-medium
                                   text-gray-700 mb-1.5">
                   Principal amount (Rs.) <span className="text-red-500">*</span>
                 </label>
                 <input
-                  type="number"
-                  step="0.01"
-                  min="1"
+                  type="number" step="0.01" min="1"
                   className="input-field w-full"
                   placeholder="e.g. 50000"
                   value={loanForm.principal}
                   onChange={(e) => setLoanForm({
                     ...loanForm, principal: e.target.value
                   })}
-                  required
-                  autoFocus
+                  required autoFocus
                 />
                 <p className="text-xs text-gray-400 mt-1">
-                  Interest rate and term will be set by the administrator.
+                  Interest rate and term will be set by administrator.
                 </p>
               </div>
-
               <div>
                 <label className="block text-sm font-medium
                                   text-gray-700 mb-1.5">
                   Purpose <span className="text-red-500">*</span>
                 </label>
                 <textarea
-                  className="input-field w-full resize-none"
-                  rows={3}
-                  placeholder="Describe why you need this loan..."
+                  className="input-field w-full resize-none" rows={3}
+                  placeholder="Why do you need this loan?"
                   value={loanForm.purpose}
                   onChange={(e) => setLoanForm({
                     ...loanForm, purpose: e.target.value
@@ -403,526 +542,137 @@ export default function MemberDashboard() {
                   required
                 />
               </div>
-
-              <div className="bg-emerald-50 border border-emerald-100
+              <div className="bg-indigo-50 border border-indigo-100
                               rounded-xl px-4 py-3">
-                <p className="text-xs text-emerald-700">
+                <p className="text-xs text-indigo-700">
                   ℹ️ Your application will be reviewed by the administrator.
-                  You will be notified once approved or rejected.
                 </p>
               </div>
-
-              <div className="flex gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setShowLoanForm(false)}
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setShowLoanModal(false)}
                   className="btn-secondary flex-1">
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={loanFormLoad}
-                  className="flex-1 py-2.5 rounded-lg bg-emerald-700
-                             hover:bg-emerald-800 disabled:opacity-50
-                             text-white font-medium text-sm
-                             transition-colors">
-                  {loanFormLoad ? 'Submitting...' : 'Submit application'}
+                <button type="submit" disabled={loanLoad}
+                  className="flex-1 py-2.5 rounded-xl bg-indigo-600
+                             hover:bg-indigo-700 text-white font-medium
+                             text-sm disabled:opacity-50">
+                  {loanLoad ? 'Submitting...' : 'Submit application'}
                 </button>
               </div>
             </form>
-          </Modal>
-        )}
+          </div>
+        </div>
+      )}
 
-        {/* ── Profile section ──────────────────────────────────────────── */}
-        <Section title="Profile" icon="👤">
-          {profileSuccess && (
-            <div className="mb-3 px-4 py-3 bg-emerald-50 border
-                            border-emerald-200 text-emerald-700
-                            rounded-xl text-sm">
-              {profileSuccess}
-            </div>
-          )}
-
-          {!editProfile ? (
-            <>
-              <div className="space-y-1.5">
-                {[
-                  ['Full name', user?.full_name],
-                  ['Email',     user?.email],
-                  ['Phone',     user?.phone],
-                  ['Address',   user?.address],
-                ].map(([label, value]) => (
-                  <div key={label}
-                    className="flex justify-between items-start gap-4
-                               px-4 py-2.5 rounded-xl bg-gray-50
-                               border border-gray-100">
-                    <span className="text-gray-400 text-xs font-medium
-                                     uppercase tracking-wide pt-0.5
-                                     w-20 flex-shrink-0">
-                      {label}
-                    </span>
-                    <span className="text-gray-800 font-medium text-sm
-                                     text-right break-words">
-                      {value || (
-                        <span className="text-gray-400 italic text-xs">
-                          Not set
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              <button
-                onClick={() => {
-                  setProfileForm({
-                    full_name: user?.full_name || '',
-                    phone:     user?.phone     || '',
-                    address:   user?.address   || '',
-                  })
-                  setProfileErr('')
-                  setProfileSuccess('')
-                  setEditProfile(true)
-                }}
-                className="btn-secondary text-sm w-full mt-3">
-                Edit profile
-              </button>
-            </>
-          ) : (
-            <form onSubmit={handleUpdateProfile} className="space-y-4">
-              {profileErr && <ErrorBox msg={profileErr} />}
-
-              <div>
-                <label className="block text-sm font-medium
-                                  text-gray-700 mb-1.5">
-                  Full name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  className="input-field w-full"
-                  value={profileForm.full_name}
-                  onChange={(e) => setProfileForm({
-                    ...profileForm, full_name: e.target.value
-                  })}
-                  required
-                  autoFocus
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium
-                                  text-gray-700 mb-1.5">
-                  Phone
-                </label>
-                <input
-                  type="tel"
-                  className="input-field w-full"
-                  placeholder="98XXXXXXXX"
-                  value={profileForm.phone}
-                  onChange={(e) => setProfileForm({
-                    ...profileForm, phone: e.target.value
-                  })}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium
-                                  text-gray-700 mb-1.5">
-                  Address
-                </label>
-                <textarea
-                  className="input-field w-full resize-none"
-                  rows={2}
-                  placeholder="Your address"
-                  value={profileForm.address}
-                  onChange={(e) => setProfileForm({
-                    ...profileForm, address: e.target.value
-                  })}
-                />
-              </div>
-
-              <div className="flex gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditProfile(false)
-                    setProfileErr('')
-                  }}
-                  className="btn-secondary flex-1">
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={profileLoad}
-                  className="flex-1 py-2.5 rounded-lg bg-emerald-700
-                             hover:bg-emerald-800 disabled:opacity-50
-                             text-white font-medium text-sm
-                             transition-colors">
-                  {profileLoad ? 'Saving...' : 'Save changes'}
-                </button>
-              </div>
-            </form>
-          )}
-        </Section>
-
-        {/* ── Security section ─────────────────────────────────────────── */}
-        <Section title="Security" icon="🔒">
-          {!showPwForm ? (
-            <div className="flex items-center justify-between gap-4
-                            flex-wrap">
-              <div>
-                <p className="text-sm font-medium text-gray-900">Password</p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Change your login password
-                </p>
-              </div>
-              <button
-                onClick={() => setShowPwForm(true)}
-                className="btn-secondary text-sm">
-                Change password
-              </button>
-            </div>
-          ) : (
-            <form onSubmit={handleChangePassword} className="space-y-4">
-              {pwErr && <ErrorBox msg={pwErr} />}
-              {pwSuccess && (
-                <div className="px-3 py-2 bg-emerald-50 border
-                                border-emerald-200 text-emerald-700
-                                rounded-lg text-sm">
-                  {pwSuccess}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-sm font-medium
-                                  text-gray-700 mb-1.5">
-                  Current password
-                </label>
-                <input
-                  type={showPw ? 'text' : 'password'}
-                  className="input-field w-full"
-                  value={pwForm.current_password}
-                  onChange={(e) => setPwForm({
-                    ...pwForm, current_password: e.target.value
-                  })}
-                  required
-                  autoFocus
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium
-                                  text-gray-700 mb-1.5">
-                  New password
-                </label>
-                <input
-                  type={showPw ? 'text' : 'password'}
-                  className="input-field w-full"
-                  placeholder="Min. 8 characters"
-                  value={pwForm.new_password}
-                  onChange={(e) => setPwForm({
-                    ...pwForm, new_password: e.target.value
-                  })}
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium
-                                  text-gray-700 mb-1.5">
-                  Confirm new password
-                </label>
-                <input
-                  type={showPw ? 'text' : 'password'}
-                  className="input-field w-full"
-                  value={pwForm.confirm_password}
-                  onChange={(e) => setPwForm({
-                    ...pwForm, confirm_password: e.target.value
-                  })}
-                  required
-                />
-              </div>
-
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="showpw"
-                  checked={showPw}
-                  onChange={() => setShowPw(!showPw)}
-                  className="cursor-pointer"
-                />
-                <label htmlFor="showpw"
-                  className="text-xs text-gray-500 cursor-pointer">
-                  Show passwords
-                </label>
-              </div>
-
-              <div className="flex gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowPwForm(false)
-                    setPwErr('')
-                    setPwForm({
-                      current_password: '',
-                      new_password: '',
-                      confirm_password: '',
-                    })
-                  }}
-                  className="btn-secondary flex-1">
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={pwLoad}
-                  className="flex-1 py-2.5 rounded-lg bg-emerald-700
-                             hover:bg-emerald-800 disabled:opacity-50
-                             text-white font-medium text-sm
-                             transition-colors">
-                  {pwLoad ? 'Saving...' : 'Change password'}
-                </button>
-              </div>
-            </form>
-          )}
-        </Section>
-
-      </div>
     </MemberLayout>
   )
 }
 
-// ── Reusable pieces ──────────────────────────────────────────────────────────
+// ── Reusable components ───────────────────────────────────────────────────────
 
-function SummaryCard({ icon, label, value, accent }) {
-  const colors = {
-    emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-    blue:    'bg-blue-50 text-blue-700 border-blue-100',
-    amber:   'bg-amber-50 text-amber-700 border-amber-100',
-  }
+function StatPill({ label, value, highlight }) {
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100
-                    p-4 flex items-center gap-3">
-      <div className={`w-11 h-11 rounded-xl flex items-center justify-center
-                       text-xl flex-shrink-0 border ${colors[accent]}`}>
-        {icon}
-      </div>
-      <div className="min-w-0">
-        <p className="text-xs text-gray-400 font-medium uppercase
-                      tracking-wide truncate">
-          {label}
-        </p>
-        <p className="text-lg font-bold text-gray-800 truncate">
-          {value}
-        </p>
-      </div>
+    <div className={`rounded-xl p-3 ${highlight ? 'bg-amber-400/20' : 'bg-white/10'}`}>
+      <p className="text-indigo-200 text-[10px] font-medium uppercase
+                    tracking-wide leading-none truncate">
+        {label}
+      </p>
+      <p className="text-sm font-bold mt-1.5 leading-none truncate">
+        {value}
+      </p>
     </div>
   )
 }
 
-function Section({ title, icon, action, children }) {
-  return (
-    <section className="bg-white rounded-2xl shadow-sm border
-                        border-gray-100 p-5 sm:p-6">
-      <div className="flex items-center justify-between gap-3 mb-4">
-        <h2 className="text-base font-semibold text-gray-800 flex
-                       items-center gap-2">
-          <span className="text-lg">{icon}</span>
-          {title}
-        </h2>
-        {action}
+function QuickAction({ Icon, label, to, onClick, disabled }) {
+  const content = (
+    <>
+      <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center
+                      justify-center group-hover:bg-indigo-100
+                      transition-colors">
+        <Icon size={20} className="text-indigo-600" />
       </div>
-      {children}
-    </section>
+      <span className="text-[11px] font-medium text-gray-600 text-center
+                       leading-tight">
+        {label}
+      </span>
+    </>
   )
+
+  const className = `group flex flex-col items-center justify-center
+                      bg-gray-50 hover:bg-indigo-50/50 border border-gray-100
+                      hover:border-indigo-200 rounded-xl py-3.5 px-2
+                      transition-all gap-2
+                      disabled:opacity-50 disabled:cursor-not-allowed`
+
+  if (to) return <Link to={to} className={className}>{content}</Link>
+  return <button onClick={onClick} disabled={disabled} className={className}>{content}</button>
 }
 
-function EmptyState({ text, small }) {
-  return (
-    <div className={`text-center text-gray-400 text-sm bg-gray-50
-                     rounded-xl border border-gray-100
-                     ${small ? 'py-5' : 'py-8'}`}>
-      {text}
-    </div>
-  )
-}
-
-function Pill({ children }) {
-  return (
-    <span className="text-xs font-medium bg-white/15 backdrop-blur
-                     px-2.5 py-1 rounded-full">
-      {children}
-    </span>
-  )
-}
-
-function ErrorBox({ msg }) {
-  return (
-    <div className="px-3 py-2 bg-red-50 border border-red-200
-                    text-red-700 rounded-lg text-sm">
-      {msg}
-    </div>
-  )
-}
-
-function Modal({ title, onClose, children }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center
-                    bg-black bg-opacity-40 px-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md
-                      max-h-[90vh] overflow-y-auto">
-        <div className="px-6 py-4 border-b border-gray-200 flex
-                        items-center justify-between sticky top-0
-                        bg-white z-10">
-          <h3 className="font-semibold text-gray-800">{title}</h3>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-xl
-                       leading-none">
-            ✕
-          </button>
-        </div>
-        <div className="px-6 py-5">{children}</div>
-      </div>
-    </div>
-  )
-}
-
-// ── Loan Card ────────────────────────────────────────────────────────────────
-
-function LoanCard({ loan, fmt, onCancel, cancelLoad }) {
-  const STATUS_BADGE = {
-    pending:  'badge-warning',
-    approved: 'badge-info',
-    active:   'badge-success',
-    closed:   'badge-gray',
-    rejected: 'badge-danger',
-  }
-
-  const STATUS_COLORS = {
-    pending:  'bg-amber-50 border-amber-200',
-    approved: 'bg-blue-50 border-blue-200',
-    active:   'bg-emerald-50 border-emerald-200',
-    closed:   'bg-gray-50 border-gray-200',
-    rejected: 'bg-red-50 border-red-200',
-  }
-
+function ActiveLoanCard({ loan, fmt }) {
   const progress = loan.total_payable > 0
     ? (parseFloat(loan.amount_paid) / parseFloat(loan.total_payable)) * 100
     : 0
 
   return (
-    <div className={`rounded-2xl border overflow-hidden
-                     ${STATUS_COLORS[loan.status] || 'bg-white border-gray-200'}`}>
-
-      {/* Header */}
-      <div className="px-4 py-3 flex items-center justify-between
-                      border-b border-inherit gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-gray-800">
+    <div className="bg-white border border-gray-100 rounded-2xl
+                    shadow-sm overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-gray-50 flex items-center
+                      justify-between">
+        <div>
+          <p className="text-sm font-bold text-gray-800">
             {fmt(loan.principal)}
           </p>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <p className="text-xs text-gray-400 mt-0.5">
             {loan.interest_rate}% p.a. · {loan.term_months} months
           </p>
         </div>
-        <span className={STATUS_BADGE[loan.status] || 'badge-gray'}>
-          {loan.status}
+        <span className="text-xs bg-emerald-100 text-emerald-700 px-2.5
+                         py-1 rounded-full font-medium">
+          Active
         </span>
       </div>
 
-      {loan.status === 'pending' && (
-        <div className="px-4 py-3">
-          <p className="text-xs text-amber-700 mb-2">
-            ⏳ Your application is under review by the administrator.
-          </p>
-          {loan.purpose && (
-            <p className="text-xs text-gray-500 mb-3">
-              Purpose: {loan.purpose}
-            </p>
-          )}
-          <button
-            onClick={() => onCancel(loan.id)}
-            disabled={cancelLoad === loan.id}
-            className="text-xs text-red-500 hover:text-red-700
-                       font-medium underline">
-            {cancelLoad === loan.id ? 'Cancelling...' : 'Cancel application'}
-          </button>
-        </div>
-      )}
-
-      {loan.status === 'rejected' && (
-        <div className="px-4 py-3">
-          <p className="text-xs text-red-600">
-            ✗ Your loan application was rejected.
-            Contact the administrator for more information.
-          </p>
-          {loan.purpose && (
-            <p className="text-xs text-gray-500 mt-1">
-              Purpose: {loan.purpose}
-            </p>
-          )}
-        </div>
-      )}
-
-      {loan.status === 'approved' && (
-        <div className="px-4 py-3">
-          <p className="text-xs text-blue-700">
-            ✓ Your loan is approved and will be disbursed soon.
-          </p>
-          {loan.purpose && (
-            <p className="text-xs text-gray-500 mt-1">
-              Purpose: {loan.purpose}
-            </p>
-          )}
-        </div>
-      )}
-
-      {loan.status === 'active' && (
-        <div className="px-4 py-3 space-y-3">
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              ['Monthly EMI', fmt(loan.monthly_installment)],
-              ['Amount paid', fmt(loan.amount_paid)],
-              ['Remaining',   fmt(loan.amount_remaining)],
-            ].map(([label, value]) => (
-              <div key={label}>
-                <p className="text-xs text-gray-500">{label}</p>
-                <p className="text-sm font-semibold text-gray-800
-                              truncate">{value}</p>
-              </div>
-            ))}
-          </div>
-
-          <div>
-            <div className="flex justify-between text-xs text-gray-400 mb-1">
-              <span>Repayment progress</span>
-              <span>{progress.toFixed(1)}%</span>
+      <div className="px-5 py-4 space-y-3">
+        <div className="grid grid-cols-3 gap-2.5">
+          {[
+            ['Monthly EMI', fmt(loan.monthly_installment), 'text-indigo-600'],
+            ['Paid',        fmt(loan.amount_paid),         'text-emerald-600'],
+            ['Remaining',   fmt(loan.amount_remaining),    'text-red-500'],
+          ].map(([label, val, color]) => (
+            <div key={label}
+              className="bg-gray-50 rounded-xl p-3 text-center">
+              <p className="text-[10px] text-gray-400 font-medium uppercase
+                            truncate">
+                {label}
+              </p>
+              <p className={`text-xs font-bold mt-1 ${color}`}>{val}</p>
             </div>
-            <div className="w-full bg-white rounded-full h-2">
-              <div
-                className="bg-emerald-600 h-2 rounded-full transition-all"
-                style={{ width: `${Math.min(progress, 100)}%` }}
-              />
-            </div>
+          ))}
+        </div>
+
+        <div>
+          <div className="flex justify-between text-[10px] text-gray-400 mb-1">
+            <span>Repayment progress</span>
+            <span>{progress.toFixed(1)}%</span>
           </div>
-
-          {loan.due_date && (
-            <p className="text-xs text-gray-400">
-              Due date: <strong>{toBS(loan.due_date)}</strong>
-            </p>
-          )}
+          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-indigo-500 rounded-full transition-all"
+              style={{ width: `${Math.min(progress, 100)}%` }}
+            />
+          </div>
         </div>
-      )}
 
-      {loan.status === 'closed' && (
-        <div className="px-4 py-3">
-          <p className="text-xs text-gray-500">
-            ✓ This loan has been fully repaid.
+        {loan.due_date && (
+          <p className="text-xs text-gray-400">
+            Next due: <strong className="text-gray-600">
+              {toBS(loan.due_date)}
+            </strong>
           </p>
-          <p className="text-xs text-gray-400 mt-1">
-            Total paid: {fmt(loan.amount_paid)}
-          </p>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }

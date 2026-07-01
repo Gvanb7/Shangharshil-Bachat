@@ -566,3 +566,64 @@ class TransactionEditLog(models.Model):
 
     def __str__(self):
         return f'Edit {self.transaction_type} {self.reference_id} by {self.edited_by.email}'
+    
+class Notice(models.Model):
+    id          = models.UUIDField(
+                      primary_key=True,
+                      default=uuid.uuid4,
+                      editable=False
+                  )
+    title       = models.CharField(max_length=200)
+    body        = models.TextField(blank=True)
+    attachment  = models.FileField(
+                      upload_to='notices/',
+                      null=True,
+                      blank=True
+                  )
+    attachment_type = models.CharField(
+                          max_length=10,
+                          blank=True
+                      )  # 'pdf' or 'image'
+    is_active   = models.BooleanField(default=True)
+    is_pinned   = models.BooleanField(default=False)
+    nepali_date = models.CharField(max_length=20, blank=True)
+    published_at = models.DateField()
+    created_by  = models.ForeignKey(
+                      settings.AUTH_USER_MODEL,
+                      on_delete=models.PROTECT,
+                      related_name='notices'
+                  )
+    created_at  = models.DateTimeField(auto_now_add=True)
+    updated_at  = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-is_pinned', '-published_at']
+
+    def __str__(self):
+        return self.title
+
+
+class NoticeRead(models.Model):
+    """Tracks which members have read which notices."""
+    id      = models.UUIDField(
+                  primary_key=True,
+                  default=uuid.uuid4,
+                  editable=False
+              )
+    notice  = models.ForeignKey(
+                  Notice,
+                  on_delete=models.CASCADE,
+                  related_name='reads'
+              )
+    member  = models.ForeignKey(
+                  settings.AUTH_USER_MODEL,
+                  on_delete=models.CASCADE,
+                  related_name='notice_reads'
+              )
+    read_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [['notice', 'member']]
+
+    def __str__(self):
+        return f'{self.member.email} read {self.notice.title}'

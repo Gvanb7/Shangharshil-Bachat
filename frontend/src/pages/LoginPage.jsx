@@ -142,19 +142,19 @@ export default function LoginPage() {
       </div>
 
       {/* ── Mobile top banner (visible only on small screens) ───────────── */}
-      <div className="lg:hidden bg-gradient-to-r from-emerald-800
-                      to-teal-600 text-white px-6 py-8 text-center">
-        <div className="flex items-center gap-3">
-            <img src="/Bachat.jpeg" alt="logo"
-            className='w-16 h-16 object-contain' />
-            
+      <div className="lg:hidden bg-gradient-to-r from-emerald-800 to-teal-600 
+                text-white px-6 py-8 text-center">
+        <div className="flex flex-col items-center justify-center gap-3">  {/* Added flex-col, justify-center */}
+          <img src="/Bachat.jpeg" alt="logo" className="w-16 h-16 object-contain" />
+          <div>
+            <h1 className="text-lg font-bold leading-tight">
+              Shree Shangharshil Bachat Samuha
+            </h1>
+            <p className="text-emerald-100 text-xs mt-1">
+              श्री संघर्षशील बचत समूह
+            </p>
           </div>
-        <h1 className="text-lg font-bold leading-tight">
-          Shree Shangharshil Bachat Samuha
-        </h1>
-        <p className="text-emerald-100 text-xs mt-1">
-          श्री संघर्षशील बचत समूह
-        </p>
+        </div>
       </div>
 
       {/* ── Right panel — login form ────────────────────────────────────── */}

@@ -16,6 +16,10 @@ import AdminStatements from './pages/admin/AdminStatements'
 import ChangePasswordPage  from './pages/ChangePasswordPage'
 import ForgotPasswordPage  from './pages/ForgotPasswordPage'
 import ResetPasswordPage   from './pages/ResetPasswordPage'
+import AdminNotices from './pages/admin/AdminNotices'
+import MemberNotices   from './pages/member/MemberNotices'
+import MemberStatement from './pages/member/MemberStatement'
+import MemberProfile   from './pages/member/MemberProfile'
 
 function RootRedirect() {
   const { isAuth, user } = useAuthStore()
@@ -76,9 +80,21 @@ export default function App() {
         <Route path="/admin/borrowers" element={
           <AdminRoute><AdminBorrowers /></AdminRoute>}
         />
+        <Route path="/admin/notices" element={
+          <AdminRoute><AdminNotices /></AdminRoute>}
+        />
         {/* Member routes */}
         <Route path="/member" element={
           <MemberRoute><MemberDashboard /></MemberRoute>
+        } />
+        <Route path="/member/notices" element={
+          <MemberRoute><MemberNotices /></MemberRoute>
+        } />
+        <Route path="/member/statement" element={
+          <MemberRoute><MemberStatement /></MemberRoute>
+        } />
+        <Route path="/member/profile" element={
+          <MemberRoute><MemberProfile /></MemberRoute>
         } />
 
         <Route path="/change-password" element={
@@ -97,6 +113,7 @@ export default function App() {
 
         {/* Catch all */}
         <Route path="*" element={<Navigate to="/" replace />} />
+
       </Routes>
     </BrowserRouter>
   )

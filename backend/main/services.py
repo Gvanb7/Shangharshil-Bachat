@@ -389,10 +389,6 @@ def transfer_between_accounts(from_account, to_account, amount,
     )
     
 def get_statement_data(tb):
-    """
-    Calculate Receipts and Payments report live from transaction history.
-    Income/Expenditure are listed independently with totals only at the end.
-    """
     from .models import (
         Account, AccountTransaction, Income, Expenditure,
         SavingsAccount, Loan, LoanRepayment, SavingsTransaction,
@@ -400,6 +396,10 @@ def get_statement_data(tb):
     )
     from django.db.models import Sum
     from decimal import Decimal
+    from .bs_calendar import (
+        get_bs_month_ad_range, ad_to_bs, get_fiscal_year,
+        get_nepali_date_from_ad,
+    )
 
     start_ad = tb.start_date_ad
     end_ad   = tb.end_date_ad
@@ -409,28 +409,62 @@ def get_statement_data(tb):
             return Decimal('0.00')
         return round2(Decimal(str(val)))
 
-    # ── OPENING BALANCE (calculated from transactions before period start) ──
-    opening_total = Decimal('0.00')
+    # ── NEW / UPDATED HELPER FUNCTIONS ────────────────────────────────────────
+    def get_ad_date_for_txn(txn):
+        """Get the relevant AD date for a transaction.
+        Uses nepali_date if available, otherwise falls back to created_at."""
+        if txn.nepali_date:
+            try:
+                from .bs_calendar import bs_to_ad
+                parts = txn.nepali_date.strip().split('-')
+                return bs_to_ad(int(parts[0]), int(parts[1]), int(parts[2]))
+            except Exception:
+                pass
+        # fallback to created_at date
+        if hasattr(txn, 'created_at') and txn.created_at:
+            return txn.created_at.date()
+        return None
+
+    def in_period(txn):
+        ad = get_ad_date_for_txn(txn)
+        if ad is None:
+            return False
+        return start_ad <= ad <= end_ad
+
+    def before_period(txn):
+        ad = get_ad_date_for_txn(txn)
+        if ad is None:
+            return False
+        return ad < start_ad
+
+    def through_period(txn):
+        ad = get_ad_date_for_txn(txn)
+        if ad is None:
+            return False
+        return ad <= end_ad
+    # ── END NEW HELPERS ───────────────────────────────────────────────────────
+
+    # ── OPENING BALANCE ─────────────────────────────────────────────────────
+    opening_total      = Decimal('0.00')
     opening_by_account = []
 
     for acct in Account.objects.filter(is_active=True).order_by('name'):
-        credits_before = d(
-            AccountTransaction.objects.filter(
-                account=acct,
-                transaction_type='credit',
-                created_at__date__lt=start_ad,
-            ).aggregate(total=Sum('amount'))['total']
-        )
-        debits_before = d(
-            AccountTransaction.objects.filter(
-                account=acct,
-                transaction_type='debit',
-                created_at__date__lt=start_ad,
-            ).aggregate(total=Sum('amount'))['total']
-        )
+        all_txns_before_credit = Decimal('0.00')
+        all_txns_before_debit  = Decimal('0.00')
+
+        for txn in AccountTransaction.objects.filter(
+            account=acct
+        ).exclude(note='Opening balance'):
+            if before_period(txn):                    # ← pass txn, not string
+                if txn.transaction_type == 'credit':
+                    all_txns_before_credit += txn.amount
+                else:
+                    all_txns_before_debit  += txn.amount
+
         opening_balance = d(
-            acct.opening_balance + credits_before - debits_before
+            acct.opening_balance + all_txns_before_credit - all_txns_before_debit
         )
+
         if opening_balance != Decimal('0.00'):
             opening_by_account.append({
                 'name':   f'Opening {acct.name} Balance',
@@ -438,13 +472,39 @@ def get_statement_data(tb):
             })
         opening_total += opening_balance
 
-    # ── INCOME (Receipts) for this period ────────────────────────────────────
-    income_items = []
+    # ── CLOSING BALANCE ─────────────────────────────────────────────────────
+    closing_total      = Decimal('0.00')
+    closing_by_account = []
 
-    # opening balances go first under income
+    for acct in Account.objects.filter(is_active=True).order_by('name'):
+        all_txns_through_credit = Decimal('0.00')
+        all_txns_through_debit  = Decimal('0.00')
+
+        for txn in AccountTransaction.objects.filter(
+            account=acct
+        ).exclude(note='Opening balance'):
+            if through_period(txn):                   # ← pass txn, not string
+                if txn.transaction_type == 'credit':
+                    all_txns_through_credit += txn.amount
+                else:
+                    all_txns_through_debit  += txn.amount
+
+        closing_balance = d(
+            acct.opening_balance + all_txns_through_credit - all_txns_through_debit
+        )
+
+        if closing_balance != Decimal('0.00'):
+            closing_by_account.append({
+                'name':   f'Closing {acct.name} Balance',
+                'amount': str(closing_balance),
+            })
+        closing_total += closing_balance
+
+    # ── INCOME (Receipts) ─────────────────────────────────────────────────────
+    income_items = []
     income_items.extend(opening_by_account)
 
-    # member savings deposits during period
+    # savings deposits
     savings_deposits = d(
         SavingsTransaction.objects.filter(
             type='deposit',
@@ -452,13 +512,13 @@ def get_statement_data(tb):
             created_at__date__lte=end_ad,
         ).aggregate(total=Sum('amount'))['total']
     )
-    if savings_deposits > Decimal('0.00'):
+    if savings_deposits > Decimal('0'):
         income_items.append({
             'name':   'Member Savings Deposits',
             'amount': str(savings_deposits),
         })
 
-    # loan repayments received (principal + interest, NOT penalty—shown separately)
+    # loan repayments
     repayments_principal = d(
         LoanRepayment.objects.filter(
             paid_at__gte=start_ad,
@@ -471,18 +531,18 @@ def get_statement_data(tb):
             paid_at__lte=end_ad,
         ).aggregate(total=Sum('interest_portion'))['total']
     )
-    if repayments_principal > Decimal('0.00'):
+    if repayments_principal > Decimal('0'):
         income_items.append({
             'name':   'Loan Repayments (Principal)',
             'amount': str(repayments_principal),
         })
-    if repayments_interest > Decimal('0.00'):
+    if repayments_interest > Decimal('0'):
         income_items.append({
             'name':   'Loan Interest Collected',
             'amount': str(repayments_interest),
         })
 
-    # penalty collected — savings penalty (immediate) + loan penalty actually paid
+    # penalties
     savings_penalty = d(
         Penalty.objects.filter(
             penalty_type='savings',
@@ -497,13 +557,13 @@ def get_statement_data(tb):
         ).aggregate(total=Sum('penalty_portion'))['total']
     )
     total_penalty = d(savings_penalty + loan_penalty_paid)
-    if total_penalty > Decimal('0.00'):
+    if total_penalty > Decimal('0'):
         income_items.append({
             'name':   'Penalty Collected',
             'amount': str(total_penalty),
         })
 
-    # other income by category
+    # income by category — use income_date for filtering
     incomes = Income.objects.filter(
         income_date__gte=start_ad,
         income_date__lte=end_ad,
@@ -517,25 +577,23 @@ def get_statement_data(tb):
     for cat, amt in sorted(income_by_cat.items()):
         income_items.append({'name': cat, 'amount': str(d(amt))})
 
-    total_income = d(
-        sum(Decimal(i['amount']) for i in income_items)
-    )
+    total_income = d(sum(Decimal(i['amount']) for i in income_items))
 
-    # ── EXPENDITURE (Payments) for this period ───────────────────────────────
+    # ── EXPENDITURE (Payments) ────────────────────────────────────────────────
     expenditure_items = []
 
-    # loan disbursements
-    loan_disbursements = d(
-        AccountTransaction.objects.filter(
-            reference_type='loan_disbursement',
-            created_at__date__gte=start_ad,
-            created_at__date__lte=end_ad,
-        ).aggregate(total=Sum('amount'))['total']
-    )
-    if loan_disbursements > Decimal('0.00'):
+    # loan disbursements — use nepali_date from AccountTransaction
+    loan_disb_total = Decimal('0.00')
+    for txn in AccountTransaction.objects.filter(
+        reference_type='loan_disbursement'
+    ):
+        if in_period(txn):                            # ← pass txn, not string
+            loan_disb_total += txn.amount
+
+    if loan_disb_total > Decimal('0'):
         expenditure_items.append({
             'name':   'Loan Disbursements',
-            'amount': str(loan_disbursements),
+            'amount': str(d(loan_disb_total)),
         })
 
     # savings withdrawals
@@ -546,13 +604,13 @@ def get_statement_data(tb):
             created_at__date__lte=end_ad,
         ).aggregate(total=Sum('amount'))['total']
     )
-    if savings_withdrawals > Decimal('0.00'):
+    if savings_withdrawals > Decimal('0'):
         expenditure_items.append({
             'name':   'Savings Withdrawals',
             'amount': str(savings_withdrawals),
         })
 
-    # savings interest paid to members
+    # savings interest paid
     savings_interest = d(
         SavingsTransaction.objects.filter(
             type='interest_credit',
@@ -560,13 +618,13 @@ def get_statement_data(tb):
             created_at__date__lte=end_ad,
         ).aggregate(total=Sum('amount'))['total']
     )
-    if savings_interest > Decimal('0.00'):
+    if savings_interest > Decimal('0'):
         expenditure_items.append({
             'name':   'Savings Interest Paid',
             'amount': str(savings_interest),
         })
 
-    # expenditure by category
+    # expenditure by category — use expense_date
     expenditures = Expenditure.objects.filter(
         expense_date__gte=start_ad,
         expense_date__lte=end_ad,
@@ -580,51 +638,27 @@ def get_statement_data(tb):
     for cat, amt in sorted(expense_by_cat.items()):
         expenditure_items.append({'name': cat, 'amount': str(d(amt))})
 
-    # ── CLOSING BALANCE (calculated from transactions up to period end) ──────
-    closing_total = Decimal('0.00')
-    closing_by_account = []
-
-    for acct in Account.objects.filter(is_active=True).order_by('name'):
-        credits_through = d(
-            AccountTransaction.objects.filter(
-                account=acct,
-                transaction_type='credit',
-                created_at__date__lte=end_ad,
-            ).aggregate(total=Sum('amount'))['total']
-        )
-        debits_through = d(
-            AccountTransaction.objects.filter(
-                account=acct,
-                transaction_type='debit',
-                created_at__date__lte=end_ad,
-            ).aggregate(total=Sum('amount'))['total']
-        )
-        closing_balance = d(
-            acct.opening_balance + credits_through - debits_through
-        )
-        if closing_balance != Decimal('0.00'):
-            closing_by_account.append({
-                'name':   f'Closing {acct.name} Balance',
-                'amount': str(closing_balance),
-            })
-        closing_total += closing_balance
-
-    # closing balances go at the end of expenditure side
+    # closing balances at end
     expenditure_items.extend(closing_by_account)
 
     total_expenditure = d(
         sum(Decimal(e['amount']) for e in expenditure_items)
     )
 
-    # ── verification check (not displayed as Dr/Cr, just internal sanity) ────
-    # Opening + Income(excl. opening) - Expenditure(excl. closing) should = Closing
+    # ── BALANCE CHECK ─────────────────────────────────────────────────────────
     income_excl_opening = d(
-        total_income - sum(Decimal(i['amount']) for i in opening_by_account)
+        total_income - sum(
+            Decimal(i['amount']) for i in opening_by_account
+        )
     )
     expenditure_excl_closing = d(
-        total_expenditure - sum(Decimal(c['amount']) for c in closing_by_account)
+        total_expenditure - sum(
+            Decimal(c['amount']) for c in closing_by_account
+        )
     )
-    expected_closing = d(opening_total + income_excl_opening - expenditure_excl_closing)
+    expected_closing = d(
+        opening_total + income_excl_opening - expenditure_excl_closing
+    )
     is_balanced = abs(expected_closing - closing_total) < Decimal('0.01')
 
     return {
@@ -650,7 +684,6 @@ def get_statement_data(tb):
         'income_items':      income_items,
         'expenditure_items': expenditure_items,
     }
-
 
 def create_trial_balance_record(bs_year, bs_month, generated_by=None,
                                  is_auto=False, force=False):

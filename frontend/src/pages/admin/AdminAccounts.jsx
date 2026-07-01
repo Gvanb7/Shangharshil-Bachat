@@ -354,6 +354,7 @@ export default function AdminAccounts() {
                               hover:text-yellow-800 font-medium">
                     Adjust balance
                   </button>
+                  <span className="text-gray-300">|</span>
                 </div>
               </div>
             ))}
